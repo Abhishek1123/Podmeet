@@ -1,0 +1,27 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function invited() {
+      return request.auth != null
+        && request.auth.token.firebase.sign_in_provider == 'google.com'
+        && request.auth.token.email_verified == true
+        && (request.auth.token.email.lower() == 'abhichatterjee90@gmail.com'
+            || firestore.exists(/databases/(default)/documents/members/$(request.auth.token.email.lower().replace('[^a-z0-9]', '_'))));
+    }
+
+    match /avatars/{userId}/{fileName} {
+      allow read: if invited();
+      allow write: if invited() && request.auth.uid == userId
+                   && request.resource.size < 5 * 1024 * 1024
+                   && request.resource.contentType.matches('image/.*');
+    }
+    match /recordings/{roomId}/{sessionId}/{fileName} {
+      allow read: if invited();
+      allow write: if invited()
+                   && request.resource.size < 1024 * 1024 * 1024
+                   && (request.resource.contentType.matches('audio/.*')
+                       || request.resource.contentType.matches('video/.*'));
+    }
+  }
+}

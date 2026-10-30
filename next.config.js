@@ -1,19 +1,16 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Lets a verification build run beside a live `next dev` without sharing .next
+  distDir: process.env.NEXT_DIST_DIR || '.next',
   reactStrictMode: false,
-  productionBrowserSourceMaps: true,
   images: {
     formats: ['image/webp'],
-  },
-  webpack: (config, { buildId, dev, isServer, defaultLoaders, nextRuntime, webpack }) => {
-    // Important: return the modified config
-    config.module.rules.push({
-      test: /\.mjs$/,
-      enforce: 'pre',
-      use: ['source-map-loader'],
-    });
-
-    return config;
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'lh3.googleusercontent.com',
+      },
+    ],
   },
   headers: async () => {
     return [
@@ -22,11 +19,7 @@ const nextConfig = {
         headers: [
           {
             key: 'Cross-Origin-Opener-Policy',
-            value: 'same-origin',
-          },
-          {
-            key: 'Cross-Origin-Embedder-Policy',
-            value: 'credentialless',
+            value: 'same-origin-allow-popups',
           },
         ],
       },

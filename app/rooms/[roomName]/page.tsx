@@ -9,7 +9,6 @@ export default async function Page({
 }: {
   params: Promise<{ roomName: string }>;
   searchParams: Promise<{
-    // FIXME: We should not allow values for regions if in playground mode.
     region?: string;
     hq?: string;
     codec?: string;
@@ -29,13 +28,21 @@ export default async function Page({
     : undefined;
 
   return (
-    <PageClientImpl
-      roomName={_params.roomName}
-      serverUrl={serverUrl}
-      region={_searchParams.region}
-      hq={hq}
-      codec={codec}
-      singlePeerConnection={singlePC}
-    />
+    <React.Suspense
+      fallback={
+        <div className="min-h-screen bg-[#090a0f] text-zinc-400 flex items-center justify-center text-sm">
+          Loading Studio Lobby...
+        </div>
+      }
+    >
+      <PageClientImpl
+        roomName={_params.roomName}
+        serverUrl={serverUrl}
+        region={_searchParams.region}
+        hq={hq}
+        codec={codec}
+        singlePeerConnection={singlePC}
+      />
+    </React.Suspense>
   );
 }

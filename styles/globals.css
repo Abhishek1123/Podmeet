@@ -1,67 +1,123 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 * {
   box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+:root {
+  --ink: #070707;
+  --acid: #c9e21b;
+  --sun: #ffd60a;
+  --chili: #f0391e;
 }
 
 html {
   color-scheme: dark;
-  background-color: #111;
+  background-color: var(--ink);
+  color: #f4f4ef;
+  -webkit-text-size-adjust: 100%;
 }
 
 html,
 body {
-  overflow: hidden;
   width: 100%;
-  height: 100%;
-  margin: 0px;
+  min-height: 100dvh;
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-body), -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif;
+  background-color: var(--ink);
+  overscroll-behavior-y: none;
 }
 
-body {
-  display: flex;
-  flex-direction: column;
+h1,
+h2,
+.font-display {
+  font-family: var(--font-display), Impact, sans-serif;
+  letter-spacing: 0.01em;
 }
 
-.header {
-  max-width: 500px;
-  padding-inline: 2rem;
+/* Mobile-first touch & safe-area utilities */
+@layer utilities {
+  .text-acid-gradient {
+    background: linear-gradient(90deg, #c9e21b 0%, #ffd60a 55%, #ff6a4d 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .bg-grain {
+    background-image: radial-gradient(rgba(255, 255, 255, 0.06) 1px, transparent 1px);
+    background-size: 3px 3px;
+  }
+  .btn-acid {
+    background: linear-gradient(135deg, #c9e21b, #ffd60a);
+    color: #070707;
+    font-weight: 800;
+    box-shadow: 0 10px 40px -10px rgba(201, 226, 27, 0.5);
+  }
+  .btn-acid:hover {
+    filter: brightness(1.08);
+  }
+  .btn-chili {
+    background: linear-gradient(135deg, #f0391e, #ff7a1a);
+    color: #fff;
+    font-weight: 800;
+    box-shadow: 0 10px 40px -10px rgba(240, 57, 30, 0.55);
+  }
+  .btn-chili:hover {
+    filter: brightness(1.08);
+  }
+  .pb-safe {
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  }
+  .pt-safe {
+    padding-top: max(0.5rem, env(safe-area-inset-top));
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
 }
 
-.header > img {
-  display: block;
-  margin: auto;
-  max-width: 100%;
+/* Touch-friendly range inputs on mobile */
+input[type='range'] {
+  touch-action: pan-y;
+  height: 6px;
+  border-radius: 9999px;
 }
 
-.header > h2 {
-  font-family: 'TWK Everett', sans-serif;
-  font-style: normal;
-  font-weight: 400;
-  font-size: 1.25rem;
-  line-height: 144%;
-  text-align: center;
-  color: rgba(255, 255, 255, 0.6);
+/* Prevent iOS auto-zoom on form inputs by ensuring at least 16px on small viewports */
+@media screen and (max-width: 640px) {
+  input[type='text'],
+  input[type='email'],
+  input[type='number'],
+  input[type='password'],
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
 }
 
-footer {
-  width: 100%;
-  padding: 1.5rem 2rem;
-  text-align: center;
-  color: rgba(255, 255, 255, 0.6);
-  background-color: var(--lk-bg);
-  border-top: 1px solid rgba(255, 255, 255, 0.15);
+/* Custom sleek scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
 }
 
-footer a,
-h2 a {
-  color: #ff6352;
-  text-decoration-color: #a33529;
-  text-underline-offset: 0.125em;
+::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.02);
 }
 
-footer a:hover,
-h2 a {
-  text-decoration-color: #ff6352;
+::-webkit-scrollbar-thumb {
+  background: rgba(201, 226, 27, 0.35);
+  border-radius: 9999px;
 }
 
-h2 a {
-  text-decoration: none;
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(201, 226, 27, 0.6);
 }
