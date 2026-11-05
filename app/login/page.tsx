@@ -48,7 +48,23 @@ function LoginInner() {
             body: JSON.stringify({ idToken }),
           });
         }
-        if (res.ok && !cancelled) window.location.href = next || '/';
+        if (res.ok && !cancelled) {
+          // Loop guard: if we keep bouncing back here, the middleware is rejecting
+          // the cookie (e.g. secret mismatch). Stop instead of refreshing forever.
+          const now = Date.now();
+          const hops = JSON.parse(sessionStorage.getItem('login_hops') || '[]').filter(
+            (t: number) => now - t < 15000
+          );
+          if (hops.length >= 2) {
+            sessionStorage.removeItem('login_hops');
+            setErrorMessage(
+              'Signed in, but the server rejected the session. Check AUTH_SESSION_SECRET in Vercel env and redeploy.'
+            );
+            return;
+          }
+          sessionStorage.setItem('login_hops', JSON.stringify([...hops, now]));
+          window.location.href = next || '/';
+        }
       } catch {
         /* the button flow surfaces errors */
       }

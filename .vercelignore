@@ -9,3 +9,4 @@ build
 *.tsbuildinfo
 *.pack
 .env*.local
+.env
