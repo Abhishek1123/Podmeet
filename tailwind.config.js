@@ -46,6 +46,9 @@ module.exports = {
   ],
   theme: {
     extend: {
+      screens: {
+        xs: '380px',
+      },
       fontFamily: {
         display: ['var(--font-display)', 'Impact', 'sans-serif'],
         sans: ['var(--font-body)', 'Inter', 'Segoe UI', 'sans-serif'],

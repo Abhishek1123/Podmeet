@@ -12,6 +12,16 @@ const nextConfig = {
       },
     ],
   },
+  // Proxy Firebase's auth helper through our own origin so sign-in works in
+  // storage-partitioned browsers (iOS Safari, etc.).
+  rewrites: async () => {
+    const firebaseDomain =
+      process.env.FIREBASE_AUTH_PROXY_TARGET || 'podmeet-app-studio.firebaseapp.com';
+    return [
+      { source: '/__/auth/:path*', destination: `https://${firebaseDomain}/__/auth/:path*` },
+      { source: '/__/firebase/:path*', destination: `https://${firebaseDomain}/__/firebase/:path*` },
+    ];
+  },
   headers: async () => {
     return [
       {
@@ -19,7 +29,7 @@ const nextConfig = {
         headers: [
           {
             key: 'Cross-Origin-Opener-Policy',
-            value: 'same-origin-allow-popups',
+            value: 'unsafe-none',
           },
         ],
       },

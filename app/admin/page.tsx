@@ -148,17 +148,17 @@ export default function AdminPortalPage() {
 
       <main className="max-w-7xl w-full mx-auto px-3.5 sm:px-6 lg:px-8 py-5 sm:py-8 space-y-6 sm:space-y-8">
         {/* Super Admin Status Banner */}
-        <div className="rounded-3xl bg-gradient-to-r from-amber-500/15 via-rose-500/10 to-violet-500/15 border border-amber-500/30 p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-300 shrink-0">
+        <div className="rounded-3xl bg-gradient-to-r from-amber-500/15 via-rose-500/10 to-violet-500/15 border border-amber-500/30 p-4 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="flex items-start sm:items-center gap-3.5">
+            <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-300 shrink-0">
               <ShieldCheck className="w-6 h-6" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-base font-bold text-white">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-sm sm:text-base font-bold text-white">
                   Super Admin Control Center
                 </h2>
-                <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300">
+                <span className="text-[10px] sm:text-[11px] font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 break-all">
                   Owner: {SUPER_ADMIN_EMAIL}
                 </span>
               </div>
@@ -172,9 +172,9 @@ export default function AdminPortalPage() {
         </div>
 
         {/* Main Grid: Add Member Form + Roster */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8 items-start">
           {/* Left: Add Podcast Member Form */}
-          <div className="lg:col-span-5 rounded-3xl bg-zinc-900/80 border border-white/10 p-6 sm:p-8 shadow-2xl">
+          <div className="lg:col-span-5 rounded-3xl bg-zinc-900/80 border border-white/10 p-4 sm:p-8 shadow-2xl">
             <div className="flex items-center gap-3 mb-6">
               <div className="w-10 h-10 rounded-xl bg-rose-500/15 border border-rose-500/30 flex items-center justify-center text-rose-400">
                 <UserPlus className="w-5 h-5" />
@@ -282,7 +282,7 @@ export default function AdminPortalPage() {
           </div>
 
           {/* Right: Podcast Members Roster */}
-          <div className="lg:col-span-7 rounded-3xl bg-zinc-900/80 border border-white/10 p-6 sm:p-8 shadow-2xl">
+          <div className="lg:col-span-7 rounded-3xl bg-zinc-900/80 border border-white/10 p-4 sm:p-8 shadow-2xl">
             <div className="flex items-center justify-between mb-6">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-violet-500/15 border border-violet-500/30 flex items-center justify-center text-violet-400">
@@ -348,10 +348,10 @@ export default function AdminPortalPage() {
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
                       <button
                         onClick={() => copyMemberInvite(m)}
-                        className="px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-medium text-zinc-200 flex items-center gap-1.5 transition"
+                        className="flex-1 sm:flex-initial justify-center px-3 py-2.5 sm:py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-medium text-zinc-200 flex items-center gap-1.5 transition"
                       >
                         {copiedId === m.id ? (
                           <>
@@ -387,7 +387,7 @@ export default function AdminPortalPage() {
         </div>
 
         {/* Active Studio Rooms & Master Record Trigger */}
-        <section className="rounded-3xl bg-zinc-900/80 border border-white/10 p-6 sm:p-8">
+        <section className="rounded-3xl bg-zinc-900/80 border border-white/10 p-4 sm:p-8">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
             <div>
               <h2 className="text-xl font-bold text-white flex items-center gap-2">

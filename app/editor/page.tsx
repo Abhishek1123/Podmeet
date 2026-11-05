@@ -227,20 +227,29 @@ function TrackWaveformCanvas({
     ctx.stroke();
   }, [track, maxDuration, playheadSec]);
 
+  const seekFromClientX = (clientX: number, el: HTMLCanvasElement) => {
+    const rect = el.getBoundingClientRect();
+    const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    onSeek(pct * maxDuration);
+  };
+
   return (
     <canvas
       ref={canvasRef}
       width={900}
       height={84}
-      onClick={(e) => {
-        const rect = e.currentTarget.getBoundingClientRect();
-        const pct = Math.max(
-          0,
-          Math.min(1, (e.clientX - rect.left) / rect.width)
-        );
-        onSeek(pct * maxDuration);
+      onClick={(e) => seekFromClientX(e.clientX, e.currentTarget)}
+      onTouchStart={(e) => {
+        if (e.touches[0]) {
+          seekFromClientX(e.touches[0].clientX, e.currentTarget);
+        }
       }}
-      className="w-full h-[84px] rounded-xl bg-zinc-950/90 border border-white/10 cursor-pointer block"
+      onTouchMove={(e) => {
+        if (e.touches[0]) {
+          seekFromClientX(e.touches[0].clientX, e.currentTarget);
+        }
+      }}
+      className="w-full h-[84px] rounded-xl bg-zinc-950/90 border border-white/10 cursor-pointer block touch-pan-y"
     />
   );
 }
@@ -1032,14 +1041,14 @@ function PodcastEditorInner() {
               </div>
             </div>
 
-            <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2 flex-wrap w-full lg:w-auto">
               <select
                 value={selectedRoomId}
                 onChange={(e) => {
                   setSelectedRoomId(e.target.value);
                   setSelectedSessionId('');
                 }}
-                className="px-3 py-2 rounded-xl bg-zinc-950 border border-white/10 text-xs text-zinc-200"
+                className="w-full sm:w-auto px-3 py-2.5 rounded-xl bg-zinc-950 border border-white/15 text-xs text-zinc-200"
               >
                 <option value="">Select Podcast Episode...</option>
                 {rooms.map((r) => (
@@ -1053,7 +1062,7 @@ function PodcastEditorInner() {
                 value={selectedSessionId}
                 onChange={(e) => setSelectedSessionId(e.target.value)}
                 disabled={sessions.length === 0}
-                className="px-3 py-2 rounded-xl bg-zinc-950 border border-white/10 text-xs text-zinc-200 disabled:opacity-50"
+                className="w-full sm:w-auto px-3 py-2.5 rounded-xl bg-zinc-950 border border-white/15 text-xs text-zinc-200 disabled:opacity-50"
               >
                 {sessions.length === 0 && (
                   <option value="">No recording sessions yet</option>
@@ -1179,7 +1188,7 @@ function PodcastEditorInner() {
                           )
                         )
                       }
-                      className={`px-2 py-1 rounded-lg text-[10px] font-bold transition ${
+                      className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition active:scale-95 ${
                         track.muted
                           ? 'bg-rose-500 text-white'
                           : 'bg-white/5 text-zinc-400 hover:text-white'
@@ -1195,7 +1204,7 @@ function PodcastEditorInner() {
                           )
                         )
                       }
-                      className={`px-2 py-1 rounded-lg text-[10px] font-bold transition ${
+                      className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition active:scale-95 ${
                         track.solo
                           ? 'bg-amber-400 text-zinc-950'
                           : 'bg-white/5 text-zinc-400 hover:text-white'
@@ -1214,7 +1223,7 @@ function PodcastEditorInner() {
                         )
                       }
                       title="Broadcast Voice EQ + Compressor"
-                      className={`px-2 py-1 rounded-lg text-[10px] font-semibold transition flex items-center gap-1 ${
+                      className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition flex items-center gap-1 active:scale-95 ${
                         track.voiceEnhance
                           ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
                           : 'bg-white/5 text-zinc-500'
@@ -1229,9 +1238,9 @@ function PodcastEditorInner() {
                           prev.filter((t) => t.id !== track.id)
                         )
                       }
-                      className="p-1 text-zinc-500 hover:text-rose-400 transition"
+                      className="p-1.5 text-zinc-500 hover:text-rose-400 transition active:scale-95"
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
                 </div>

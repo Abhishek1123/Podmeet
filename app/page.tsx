@@ -1,9 +1,15 @@
-﻿'use client';
+'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import AvatarUploader from '@/lib/AvatarUploader';
+import MicSelector from '@/lib/MicSelector';
+import {
+  MicSourceMode,
+  getSavedMicSelection,
+  saveMicSelection,
+} from '@/lib/mic-utils';
 import {
   Mic,
   Radio,
@@ -58,6 +64,53 @@ export default function HomePage() {
   const [myRooms, setMyRooms] = useState<PodcastRoom[]>([]);
   const [members, setMembers] = useState<PodcastMember[]>([]);
   const [copiedRoomId, setCopiedRoomId] = useState<string | null>(null);
+
+  // Microphone Selection State (persists into any studio room created/joined)
+  const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedAudioDevice, setSelectedAudioDevice] = useState<string>('');
+  const [micMode, setMicMode] = useState<MicSourceMode>('phone');
+  const [activeHardwareLabel, setActiveHardwareLabel] = useState<string>('');
+
+  const scanAudioDevices = useCallback(async (requestPermission = false) => {
+    try {
+      if (typeof navigator === 'undefined' || !navigator.mediaDevices) {
+        return [];
+      }
+      if (requestPermission && navigator.mediaDevices.getUserMedia) {
+        try {
+          const tempStream = await navigator.mediaDevices.getUserMedia({
+            audio: true,
+            video: false,
+          });
+          const trackLabel = tempStream.getAudioTracks()[0]?.label || '';
+          if (trackLabel) setActiveHardwareLabel(trackLabel);
+          tempStream.getTracks().forEach((t) => t.stop());
+        } catch {
+          // user may not have granted mic permission yet
+        }
+      }
+      const devs = await navigator.mediaDevices.enumerateDevices();
+      const inputs = devs.filter((d) => d.kind === 'audioinput');
+      setAudioDevices(inputs);
+      return inputs;
+    } catch {
+      return [];
+    }
+  }, []);
+
+  useEffect(() => {
+    const saved = getSavedMicSelection();
+    setMicMode(saved.mode);
+    setSelectedAudioDevice(saved.deviceId);
+    scanAudioDevices(false);
+    if (typeof navigator !== 'undefined' && navigator.mediaDevices) {
+      const onChange = () => scanAudioDevices(false);
+      navigator.mediaDevices.addEventListener?.('devicechange', onChange);
+      return () => {
+        navigator.mediaDevices.removeEventListener?.('devicechange', onChange);
+      };
+    }
+  }, [scanAudioDevices]);
 
   useEffect(() => {
     const unsubMembers = subscribeToPodcastMembers((m) => setMembers(m));
@@ -230,73 +283,113 @@ export default function HomePage() {
       </header>
 
       {/* Main Content */}
-      <main className="relative z-10 flex-1 max-w-7xl w-full mx-auto px-3.5 sm:px-6 lg:px-8 py-5 sm:py-8 space-y-6 sm:space-y-8">
-        {/* Hero */}
-        <section className="relative overflow-hidden rounded-3xl sm:rounded-[2rem] border border-acid-400/25 bg-gradient-to-br from-ink-700 via-ink to-ink-800 p-5 sm:p-10 lg:p-12">
+      <main className="relative z-10 flex-1 max-w-7xl w-full mx-auto px-3.5 sm:px-6 lg:px-8 py-4 sm:py-8 space-y-4 sm:space-y-7">
+        {/* Fast Join Bar right at the top on mobile so guests in the room can join in 2 seconds */}
+        <form
+          onSubmit={handleJoinRoom}
+          className="rounded-2xl bg-zinc-900/95 border border-acid-400/30 p-3 sm:p-4 flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 shadow-xl"
+        >
+          <div className="flex items-center gap-2.5 flex-1">
+            <div className="w-10 h-10 rounded-xl bg-violet-500/15 border border-violet-500/30 flex items-center justify-center text-violet-400 shrink-0">
+              <Smartphone className="w-5 h-5" />
+            </div>
+            <input
+              type="text"
+              value={joinInput}
+              onChange={(e) => setJoinInput(e.target.value)}
+              placeholder="In the room? Enter room code or paste link..."
+              className="w-full px-3.5 py-2.5 rounded-xl bg-zinc-950 border border-white/15 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-violet-500 transition"
+            />
+          </div>
+          <button
+            type="submit"
+            className="py-3 px-5 rounded-xl btn-acid active:scale-[0.99] text-xs sm:text-sm transition flex items-center justify-center gap-2 shrink-0"
+          >
+            <Mic className="w-4 h-4" />
+            Join Room as Mic
+          </button>
+        </form>
+
+        {/* Hero (Compact on mobile phones, full showcase on desktop) */}
+        <section className="relative overflow-hidden rounded-3xl sm:rounded-[2rem] border border-acid-400/25 bg-gradient-to-br from-ink-700 via-ink to-ink-800 p-4 sm:p-10 lg:p-12">
           <div className="pointer-events-none absolute -top-24 -right-16 w-72 h-72 rounded-full bg-chili-500/25 blur-[100px]" />
           <div className="pointer-events-none absolute -bottom-24 -left-16 w-72 h-72 rounded-full bg-acid-400/20 blur-[100px]" />
-          <div className="relative grid grid-cols-1 md:grid-cols-12 gap-8 items-center">
-            <div className="md:col-span-7 space-y-5 text-center md:text-left order-2 md:order-1">
-              <span className="inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.2em] px-3 py-1 rounded-full bg-sun-400/10 text-sun-300 border border-sun-400/30">
-                <span className="w-2 h-2 rounded-full bg-chili-500 animate-ping" />
-                Live from the studio
-              </span>
-              <h1 className="text-5xl sm:text-7xl lg:text-8xl leading-[0.95] uppercase">
-                <span className="text-acid-400">Acid</span>
-                <span className="text-sun-400">Reflux</span>
-                <span className="block text-2xl sm:text-4xl lg:text-5xl mt-3 text-acid-gradient">
-                  Spicy Indian takes. Burning hot-takes.
-                </span>
-              </h1>
-              <p className="text-sm sm:text-base text-zinc-300 max-w-xl mx-auto md:mx-0 leading-relaxed">
-                Record every voice on its own crystal-clear track â€” in the same
-                room or across the globe â€” then mix, polish and export your
-                episode. All from your phone or laptop.
+          <div className="relative grid grid-cols-1 md:grid-cols-12 gap-6 sm:gap-8 items-center">
+            <div className="md:col-span-7 space-y-4 sm:space-y-5 text-left">
+              <div className="flex items-center gap-3">
+                <Image
+                  src="/images/acidreflux-logo.jpg"
+                  alt="AcidReflux Podcast"
+                  width={56}
+                  height={56}
+                  className="md:hidden w-14 h-14 rounded-2xl object-cover object-[50%_35%] ring-2 ring-acid-400/60 shadow-acid shrink-0"
+                />
+                <div>
+                  <span className="inline-flex items-center gap-2 text-[10px] sm:text-[11px] font-bold uppercase tracking-[0.18em] px-2.5 py-1 rounded-full bg-sun-400/10 text-sun-300 border border-sun-400/30">
+                    <span className="w-2 h-2 rounded-full bg-chili-500 animate-ping" />
+                    Mobile Studio Ready
+                  </span>
+                  <h1 className="text-3xl xs:text-4xl sm:text-7xl lg:text-8xl leading-[0.95] uppercase mt-1.5">
+                    <span className="text-acid-400">Acid</span>
+                    <span className="text-sun-400">Reflux</span>
+                  </h1>
+                </div>
+              </div>
+
+              <p className="text-lg sm:text-3xl lg:text-4xl font-display uppercase leading-tight text-acid-gradient">
+                Spicy Indian takes. Burning hot-takes.
               </p>
-              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-center md:justify-start gap-3">
+
+              <p className="text-xs sm:text-base text-zinc-300 max-w-xl leading-relaxed">
+                Record every voice on its own crystal-clear 48kHz track — using
+                your <strong>Phone&apos;s Mic</strong> or{' '}
+                <strong>Headphone Mic</strong> — then mix and export in the
+                built-in studio editor.
+              </p>
+
+              <div className="grid grid-cols-2 sm:flex sm:flex-row items-stretch sm:items-center gap-2.5 sm:gap-3">
                 <a
                   href="#studio"
-                  className="px-6 py-3.5 rounded-2xl btn-chili text-sm flex items-center justify-center gap-2 active:scale-[0.99] transition"
+                  className="px-4 sm:px-6 py-3.5 rounded-2xl btn-chili text-xs sm:text-sm flex items-center justify-center gap-1.5 sm:gap-2 active:scale-[0.99] transition"
                 >
-                  <Radio className="w-4 h-4" />
-                  Start Recording
-                  <ArrowRight className="w-4 h-4" />
+                  <Radio className="w-4 h-4 shrink-0" />
+                  <span>Start Recording</span>
                 </a>
                 <button
                   onClick={() => router.push('/editor')}
-                  className="px-6 py-3.5 rounded-2xl bg-white/5 hover:bg-white/10 border border-acid-400/40 text-acid-300 text-sm font-bold flex items-center justify-center gap-2 transition"
+                  className="px-4 sm:px-6 py-3.5 rounded-2xl bg-white/5 hover:bg-white/10 border border-acid-400/40 text-acid-300 text-xs sm:text-sm font-bold flex items-center justify-center gap-1.5 sm:gap-2 transition"
                 >
-                  <Sliders className="w-4 h-4" />
-                  Open Audio Editor
+                  <Sliders className="w-4 h-4 shrink-0" />
+                  <span>Audio Editor</span>
                 </button>
               </div>
 
               {/* Avatar upload card */}
-              <div className="inline-flex items-center gap-4 rounded-2xl bg-black/40 border border-white/10 px-4 py-3 text-left">
-                <AvatarUploader size={56} showLabel />
-                <div>
-                  <p className="text-sm font-bold text-white">
-                    {user?.displayName || 'Your avatar'}
+              <div className="flex items-center gap-3.5 rounded-2xl bg-black/40 border border-white/10 px-3.5 py-2.5 text-left">
+                <AvatarUploader size={48} showLabel />
+                <div className="min-w-0">
+                  <p className="text-xs sm:text-sm font-bold text-white truncate">
+                    {user?.displayName || 'Your Studio Profile'}
                   </p>
-                  <p className="text-[11px] text-zinc-400 max-w-[210px] leading-snug">
+                  <p className="text-[11px] text-zinc-400 leading-snug">
                     {user
-                      ? 'Tap your photo to upload a new avatar. It shows up in every studio you join.'
+                      ? 'Tap your photo to change avatar across all rooms.'
                       : 'Sign in, then tap the circle to upload your avatar.'}
                   </p>
                 </div>
               </div>
             </div>
 
-            <div className="md:col-span-5 flex justify-center order-1 md:order-2">
+            <div className="hidden md:flex md:col-span-5 justify-center">
               <div className="relative animate-floaty">
                 <div className="absolute inset-0 rounded-[2rem] bg-gradient-to-tr from-chili-500/40 to-acid-400/40 blur-2xl" />
                 <Image
                   src="/images/acidreflux-logo.jpg"
-                  alt="AcidReflux Podcast â€” spicy Indian takes, burning hot-takes"
+                  alt="AcidReflux Podcast — spicy Indian takes, burning hot-takes"
                   width={576}
                   height={1024}
                   priority
-                  className="relative w-56 sm:w-72 lg:w-80 h-auto rounded-[2rem] ring-2 ring-acid-400/50 shadow-acid"
+                  className="relative w-64 lg:w-80 h-auto rounded-[2rem] ring-2 ring-acid-400/50 shadow-acid"
                 />
               </div>
             </div>
@@ -315,43 +408,17 @@ export default function HomePage() {
                   Small-Room In-Person Mode (Zero Audio Feedback)
                 </h2>
                 <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
-                  No Monitoring â€¢ Record Only
+                  No Monitoring • Record Only
                 </span>
               </div>
               <p className="text-xs text-zinc-300 mt-0.5 leading-relaxed">
                 All members sitting in the same room? Every phone records its own
                 isolated 48kHz mic track with <strong>speakers 100% muted</strong>{' '}
-                and <strong>anti-bleed mic gain</strong> â€” zero echo or howling feedback.
+                and <strong>anti-bleed mic gain</strong> — zero echo or howling feedback.
               </p>
             </div>
           </div>
         </div>
-
-        {/* Fast Join Bar on Mobile (Right at the top so guests in the room can join in 2 seconds) */}
-        <form
-          onSubmit={handleJoinRoom}
-          className="rounded-2xl bg-zinc-900/90 border border-white/10 p-3 sm:p-4 flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 shadow-xl"
-        >
-          <div className="flex items-center gap-2.5 flex-1">
-            <div className="w-9 h-9 rounded-xl bg-violet-500/15 border border-violet-500/30 flex items-center justify-center text-violet-400 shrink-0">
-              <Smartphone className="w-4 h-4" />
-            </div>
-            <input
-              type="text"
-              value={joinInput}
-              onChange={(e) => setJoinInput(e.target.value)}
-              placeholder="In the room? Enter room code or paste link..."
-              className="w-full px-3.5 py-2.5 rounded-xl bg-zinc-950 border border-white/10 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-violet-500 transition"
-            />
-          </div>
-          <button
-            type="submit"
-            className="py-3 px-5 rounded-xl btn-acid active:scale-[0.99] text-xs sm:text-sm transition flex items-center justify-center gap-2 shrink-0"
-          >
-            <Mic className="w-4 h-4" />
-            Join Room as Mic
-          </button>
-        </form>
 
         {/* Action Grid: Launch Studio vs Active Studios */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
@@ -443,6 +510,21 @@ export default function HomePage() {
                   </button>
                 </div>
               </div>
+
+              {/* Microphone Input Selection: Phone's Mic vs Headphone Mic */}
+              <MicSelector
+                audioDevices={audioDevices}
+                selectedDeviceId={selectedAudioDevice}
+                micMode={micMode}
+                activeHardwareLabel={activeHardwareLabel}
+                compact
+                onSelectMic={(devId, mode) => {
+                  setSelectedAudioDevice(devId);
+                  setMicMode(mode);
+                  saveMicSelection(mode, devId);
+                }}
+                onRescanDevices={() => scanAudioDevices(true)}
+              />
 
               <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                 <div className="sm:col-span-3">

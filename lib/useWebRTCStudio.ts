@@ -81,12 +81,29 @@ export function useWebRTCStudio(params: {
   const [waveformBars, setWaveformBars] = useState<number[]>(
     new Array(24).fill(8)
   );
+  const [activeMicLabel, setActiveMicLabel] = useState<string>('');
+  const [studioAudioDevices, setStudioAudioDevices] = useState<
+    MediaDeviceInfo[]
+  >([]);
 
   const localStreamRef = useRef<MediaStream | null>(null);
   const pcsRef = useRef<Record<string, RTCPeerConnection>>({});
   const remoteStreamsRef = useRef<Record<string, MediaStream>>({});
   const makingOfferRef = useRef<Record<string, boolean>>({});
   const audioLevelRef = useRef<number>(0);
+  const activeAudioDevRef = useRef<string | undefined>(selectedAudioDeviceId);
+
+  const refreshAudioDevices = useCallback(async () => {
+    try {
+      if (!navigator.mediaDevices?.enumerateDevices) return [];
+      const devs = await navigator.mediaDevices.enumerateDevices();
+      const inputs = devs.filter((d) => d.kind === 'audioinput');
+      setStudioAudioDevices(inputs);
+      return inputs;
+    } catch {
+      return [];
+    }
+  }, []);
 
   // Acquire or update camera/mic media stream
   // In Small-Room Mode:
@@ -101,33 +118,66 @@ export function useWebRTCStudio(params: {
       videoDev?: string,
       inSmallRoom: boolean = smallRoomMode
     ) => {
-      try {
-        const constraints: MediaStreamConstraints = {
-          audio: {
-            deviceId: audioDev ? { exact: audioDev } : undefined,
-            echoCancellation: !inSmallRoom,
-            noiseSuppression: true,
-            autoGainControl: !inSmallRoom,
-            sampleRate: 48000,
-            channelCount: 2,
-          },
-          video: wantVideo
-            ? {
-                deviceId: videoDev ? { exact: videoDev } : undefined,
-                width: { ideal: 1280 },
-                height: { ideal: 720 },
-                frameRate: { ideal: 30 },
-              }
-            : false,
-        };
+      const getStreamWithFallback = async (): Promise<MediaStream> => {
+        try {
+          return await navigator.mediaDevices.getUserMedia({
+            audio: {
+              deviceId: audioDev ? { exact: audioDev } : undefined,
+              echoCancellation: !inSmallRoom,
+              noiseSuppression: true,
+              autoGainControl: !inSmallRoom,
+              sampleRate: 48000,
+              channelCount: 2,
+            },
+            video: wantVideo
+              ? {
+                  deviceId: videoDev ? { exact: videoDev } : undefined,
+                  width: { ideal: 1280 },
+                  height: { ideal: 720 },
+                  frameRate: { ideal: 30 },
+                }
+              : false,
+          });
+        } catch (firstErr) {
+          if (audioDev) {
+            // Saved deviceId may have been unplugged; retry with default audio device
+            return await navigator.mediaDevices.getUserMedia({
+              audio: {
+                echoCancellation: !inSmallRoom,
+                noiseSuppression: true,
+                autoGainControl: !inSmallRoom,
+                sampleRate: 48000,
+                channelCount: 2,
+              },
+              video: wantVideo
+                ? {
+                    deviceId: videoDev ? { ideal: videoDev } : undefined,
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 },
+                    frameRate: { ideal: 30 },
+                  }
+                : false,
+            });
+          }
+          throw firstErr;
+        }
+      };
 
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      try {
+        const stream = await getStreamWithFallback();
         stream.getAudioTracks().forEach((t) => {
           t.enabled = wantAudio;
         });
         stream.getVideoTracks().forEach((t) => {
           t.enabled = wantVideo;
         });
+
+        const primaryAudioTrack = stream.getAudioTracks()[0];
+        if (primaryAudioTrack?.label) {
+          setActiveMicLabel(primaryAudioTrack.label);
+        }
+        activeAudioDevRef.current = audioDev;
+        refreshAudioDevices();
 
         // Replace tracks in active peer connections if any
         Object.values(pcsRef.current).forEach((pc) => {
@@ -157,6 +207,7 @@ export function useWebRTCStudio(params: {
         try {
           const audioOnlyStream = await navigator.mediaDevices.getUserMedia({
             audio: {
+              deviceId: audioDev ? { ideal: audioDev } : undefined,
               echoCancellation: !inSmallRoom,
               noiseSuppression: true,
               autoGainControl: !inSmallRoom,
@@ -166,6 +217,15 @@ export function useWebRTCStudio(params: {
           audioOnlyStream.getAudioTracks().forEach((t) => {
             t.enabled = wantAudio;
           });
+          const primaryAudioTrack = audioOnlyStream.getAudioTracks()[0];
+          if (primaryAudioTrack?.label) {
+            setActiveMicLabel(primaryAudioTrack.label);
+          }
+          activeAudioDevRef.current = audioDev;
+          refreshAudioDevices();
+          if (localStreamRef.current) {
+            localStreamRef.current.getTracks().forEach((t) => t.stop());
+          }
           localStreamRef.current = audioOnlyStream;
           setLocalStream(audioOnlyStream);
           setVideoEnabled(false);
@@ -176,7 +236,7 @@ export function useWebRTCStudio(params: {
         }
       }
     },
-    [smallRoomMode]
+    [smallRoomMode, refreshAudioDevices]
   );
 
   // Audio level & live studio waveform analyzer
@@ -552,6 +612,65 @@ export function useWebRTCStudio(params: {
     syncMyPresence({ smallRoomMode });
   }, [smallRoomMode, joined, syncMyPresence]);
 
+  // Hot-swap microphone when selectedAudioDeviceId changes while inside the studio
+  useEffect(() => {
+    if (!joined || !localStreamRef.current) return;
+    if (activeAudioDevRef.current === selectedAudioDeviceId) return;
+    acquireMedia(
+      audioEnabled,
+      videoEnabled,
+      selectedAudioDeviceId,
+      selectedVideoDeviceId,
+      smallRoomMode
+    );
+  }, [
+    joined,
+    selectedAudioDeviceId,
+    selectedVideoDeviceId,
+    audioEnabled,
+    videoEnabled,
+    smallRoomMode,
+    acquireMedia,
+  ]);
+
+  // Listen for headphone plug/unplug or Bluetooth connect events
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices) return;
+    const handleDeviceChange = () => {
+      refreshAudioDevices();
+    };
+    navigator.mediaDevices.addEventListener?.(
+      'devicechange',
+      handleDeviceChange
+    );
+    return () => {
+      navigator.mediaDevices.removeEventListener?.(
+        'devicechange',
+        handleDeviceChange
+      );
+    };
+  }, [refreshAudioDevices]);
+
+  const switchAudioDevice = useCallback(
+    async (newDeviceId: string) => {
+      activeAudioDevRef.current = newDeviceId || undefined;
+      return await acquireMedia(
+        audioEnabled,
+        videoEnabled,
+        newDeviceId || undefined,
+        selectedVideoDeviceId,
+        smallRoomMode
+      );
+    },
+    [
+      acquireMedia,
+      audioEnabled,
+      videoEnabled,
+      selectedVideoDeviceId,
+      smallRoomMode,
+    ]
+  );
+
   const toggleAudio = useCallback(async () => {
     const next = !audioEnabled;
     setAudioEnabled(next);
@@ -668,5 +787,9 @@ export function useWebRTCStudio(params: {
     toggleScreenShare,
     setRecordingStatus,
     acquireMedia,
+    activeMicLabel,
+    studioAudioDevices,
+    refreshAudioDevices,
+    switchAudioDevice,
   };
 }

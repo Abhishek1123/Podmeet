@@ -1,13 +1,13 @@
 'use client';
 
-import React, { Suspense, useState } from 'react';
+import React, { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Mic, ShieldAlert, AlertTriangle, Info } from 'lucide-react';
 import { useAuth } from '@/lib/AuthContext';
 
 function LoginInner() {
   const params = useSearchParams();
-  const { signInWithGoogle } = useAuth();
+  const { signInWithGoogle, user } = useAuth();
   const [busy, setBusy] = useState(false);
   const errorParam = params.get('error');
   const emailParam = params.get('email') || '';
@@ -23,7 +23,41 @@ function LoginInner() {
 
   const rawNext = params.get('next') || '/';
   // Only allow same-origin relative redirects.
-  const next = rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : '/';
+  const next =
+    rawNext.startsWith('/') &&
+    !rawNext.startsWith('//') &&
+    !rawNext.startsWith('/__/') &&
+    !rawNext.startsWith('/login') &&
+    !rawNext.startsWith('/api/')
+      ? rawNext
+      : '/';
+
+  // Redirect as soon as a valid server session exists. Covers: already signed in,
+  // and the case where Firebase reports the user but the popup promise never resolves.
+  useEffect(() => {
+    if (errorParam || busy) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        let res = await fetch('/api/auth/session', { cache: 'no-store' });
+        if (!res.ok && user) {
+          const idToken = await user.getIdToken(true);
+          res = await fetch('/api/auth/session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ idToken }),
+          });
+        }
+        if (res.ok && !cancelled) window.location.href = next || '/';
+      } catch {
+        /* the button flow surfaces errors */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, errorParam, busy, next]);
 
   const handleSignIn = async () => {
     setBusy(true);
@@ -31,7 +65,7 @@ function LoginInner() {
     setErrorMessage(null);
     const result = await signInWithGoogle();
     if (result.ok) {
-      window.location.replace(next);
+      window.location.href = next || '/';
       return;
     }
     if (result.error === 'not_invited') {

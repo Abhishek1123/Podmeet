@@ -66,10 +66,16 @@ export const metadata: Metadata = {
   },
   icons: {
     icon: [
-      { url: '/favicon.ico' },
+      { url: '/favicon.svg', type: 'image/svg+xml' },
+      { url: '/favicon.ico', sizes: '48x48' },
+      { url: '/icon.png', sizes: '48x48', type: 'image/png' },
       { url: '/images/acidreflux-logo.jpg', type: 'image/jpeg' },
     ],
-    apple: '/images/acidreflux-logo.jpg',
+    shortcut: '/favicon.ico',
+    apple: [
+      { url: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' },
+      { url: '/images/acidreflux-logo.jpg' },
+    ],
   },
 };
 

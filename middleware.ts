@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { SESSION_COOKIE, verifySessionToken } from '@/lib/session';
 
 /** Everything requires an invited Google session except these. */
-const PUBLIC_PATHS = ['/login', '/api/auth/session'];
+const PUBLIC_PATHS = ['/login', '/api/auth/session', '/__/auth', '/__/firebase'];
 
 /** Only the super admin may open these. */
 const ADMIN_ONLY = ['/admin'];

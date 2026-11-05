@@ -16,6 +16,10 @@ const firebaseConfig = {
   apiKey:
     process.env.NEXT_PUBLIC_FIREBASE_API_KEY ||
     'AIzaSyABZe6gfWaxWsLDC7ofkPQPIr_PZe-xiIo',
+  // Use Firebase's default auth domain: its OAuth redirect URI is registered
+  // automatically. To use a custom domain via the next.config.js proxy instead,
+  // set NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN to that domain and register
+  // https://<domain>/__/auth/handler in the Google Cloud OAuth client.
   authDomain:
     process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN ||
     'podmeet-app-studio.firebaseapp.com',

@@ -86,9 +86,43 @@ h2,
 
 /* Touch-friendly range inputs on mobile */
 input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
   touch-action: pan-y;
-  height: 6px;
+  height: 8px;
   border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.12);
+  cursor: pointer;
+}
+
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 9999px;
+  background: #c9e21b;
+  border: 2px solid #070707;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+}
+
+input[type='range']::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: 9999px;
+  background: #c9e21b;
+  border: 2px solid #070707;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+}
+
+button,
+a,
+select,
+input,
+label {
+  touch-action: manipulation;
 }
 
 /* Prevent iOS auto-zoom on form inputs by ensuring at least 16px on small viewports */

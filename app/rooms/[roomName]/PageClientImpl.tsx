@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -33,8 +33,18 @@ import {
   ShieldCheck,
   Headphones,
   Smartphone,
+  X,
+  ChevronDown,
 } from 'lucide-react';
 import { useAuth, SUPER_ADMIN_EMAIL } from '@/lib/AuthContext';
+import MicSelector from '@/lib/MicSelector';
+import {
+  MicSourceMode,
+  classifyMicLabel,
+  findBestMicForMode,
+  getSavedMicSelection,
+  saveMicSelection,
+} from '@/lib/mic-utils';
 import {
   PodcastRoom,
   PodcastMember,
@@ -148,7 +158,7 @@ function VideoStreamTile({
     buildSyntheticBars(audioEnabled ? remoteAudioLevel ?? 18 : 6);
 
   return (
-    <div className="relative rounded-2xl sm:rounded-3xl bg-zinc-900/90 border border-white/10 overflow-hidden flex flex-col justify-between min-h-[168px] sm:aspect-video shadow-xl group">
+    <div className="relative rounded-2xl sm:rounded-3xl bg-zinc-900/90 border border-white/10 overflow-hidden flex flex-col justify-between min-h-[136px] sm:min-h-[168px] sm:aspect-video shadow-xl group">
       {hasVideoTrack ? (
         <video
           ref={videoRef}
@@ -298,10 +308,21 @@ export function PageClientImpl(props: {
   const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([]);
   const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedAudioDevice, setSelectedAudioDevice] = useState<string>('');
+  const [micMode, setMicMode] = useState<MicSourceMode>('phone');
+  const [previewMicLabel, setPreviewMicLabel] = useState<string>('');
   const [selectedVideoDevice, setSelectedVideoDevice] = useState<string>('');
   const [previewLevel, setPreviewLevel] = useState(0);
-  const [showHardwareSettings, setShowHardwareSettings] = useState(false);
+  const [showStudioMicSheet, setShowStudioMicSheet] = useState(false);
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
+
+  // Restore saved mic preference on mount
+  useEffect(() => {
+    const saved = getSavedMicSelection();
+    setMicMode(saved.mode);
+    if (saved.deviceId) {
+      setSelectedAudioDevice(saved.deviceId);
+    }
+  }, []);
 
   // Small Room Mode (No Monitoring / Zero Audio Feedback) vs Remote Mode
   // Defaults to true for the small-room scenario!
@@ -469,6 +490,34 @@ export function PageClientImpl(props: {
     }
   }, [joined, roomData?.sessionLive, roomData?.isRecording]);
 
+  const rescanLobbyDevices = useCallback(async () => {
+    try {
+      if (!navigator.mediaDevices?.enumerateDevices) return [];
+      const devs = await navigator.mediaDevices.enumerateDevices();
+      const audioIn = devs.filter((d) => d.kind === 'audioinput');
+      const videoIn = devs.filter((d) => d.kind === 'videoinput');
+      setAudioDevices(audioIn);
+      setVideoDevices(videoIn);
+      return audioIn;
+    } catch {
+      return [];
+    }
+  }, []);
+
+  // Listen for headphone plug/unplug while in the Green Room Lobby
+  useEffect(() => {
+    if (joined || typeof navigator === 'undefined' || !navigator.mediaDevices) {
+      return;
+    }
+    const onDevChange = () => {
+      rescanLobbyDevices();
+    };
+    navigator.mediaDevices.addEventListener?.('devicechange', onDevChange);
+    return () => {
+      navigator.mediaDevices.removeEventListener?.('devicechange', onDevChange);
+    };
+  }, [joined, rescanLobbyDevices]);
+
   // Green Room mic & optional camera preview
   useEffect(() => {
     if (joined) return;
@@ -480,21 +529,34 @@ export function PageClientImpl(props: {
 
     const initPreview = async () => {
       try {
-        const s = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            deviceId: selectedAudioDevice
-              ? { exact: selectedAudioDevice }
-              : undefined,
-            echoCancellation: !smallRoomMode,
-            noiseSuppression: true,
-            autoGainControl: !smallRoomMode,
-          },
-          video: preJoinVideo
-            ? selectedVideoDevice
-              ? { deviceId: { exact: selectedVideoDevice } }
-              : true
-            : false,
-        });
+        let s: MediaStream;
+        try {
+          s = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              deviceId: selectedAudioDevice
+                ? { exact: selectedAudioDevice }
+                : undefined,
+              echoCancellation: !smallRoomMode,
+              noiseSuppression: true,
+              autoGainControl: !smallRoomMode,
+            },
+            video: preJoinVideo
+              ? selectedVideoDevice
+                ? { deviceId: { exact: selectedVideoDevice } }
+                : true
+              : false,
+          });
+        } catch {
+          // Fallback if saved deviceId was unplugged
+          s = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: !smallRoomMode,
+              noiseSuppression: true,
+              autoGainControl: !smallRoomMode,
+            },
+            video: preJoinVideo,
+          });
+        }
         if (!active) {
           s.getTracks().forEach((t) => t.stop());
           return;
@@ -502,13 +564,30 @@ export function PageClientImpl(props: {
         s.getAudioTracks().forEach((t) => (t.enabled = preJoinAudio));
         currentStream = s;
 
+        const firstAudioTrack = s.getAudioTracks()[0];
+        if (firstAudioTrack?.label) {
+          setPreviewMicLabel(firstAudioTrack.label);
+        }
+
         if (previewVideoRef.current && preJoinVideo) {
           previewVideoRef.current.srcObject = s;
         }
 
         const devs = await navigator.mediaDevices.enumerateDevices();
-        setAudioDevices(devs.filter((d) => d.kind === 'audioinput'));
+        const audioInputs = devs.filter((d) => d.kind === 'audioinput');
+        setAudioDevices(audioInputs);
         setVideoDevices(devs.filter((d) => d.kind === 'videoinput'));
+
+        // If user chose 'headphone' or 'phone' mode and no specific deviceId was bound yet, bind best match
+        if (!selectedAudioDevice && audioInputs.length > 0) {
+          const saved = getSavedMicSelection();
+          if (saved.mode === 'headphone') {
+            const bestHp = findBestMicForMode(audioInputs, 'headphone');
+            if (bestHp?.deviceId) {
+              setSelectedAudioDevice(bestHp.deviceId);
+            }
+          }
+        }
 
         if (preJoinAudio && s.getAudioTracks().length > 0) {
           const AudioCtx =
@@ -573,6 +652,10 @@ export function PageClientImpl(props: {
     toggleVideo,
     toggleScreenShare,
     setRecordingStatus,
+    activeMicLabel,
+    studioAudioDevices,
+    refreshAudioDevices,
+    switchAudioDevice,
   } = useWebRTCStudio({
     roomId: props.roomName,
     joined,
@@ -586,6 +669,61 @@ export function PageClientImpl(props: {
     selectedVideoDeviceId: selectedVideoDevice || undefined,
     smallRoomMode,
   });
+
+  const effectiveAudioDevices =
+    studioAudioDevices.length > 0 ? studioAudioDevices : audioDevices;
+  const effectiveActiveMicLabel = activeMicLabel || previewMicLabel;
+
+  const handleSelectMic = useCallback(
+    async (deviceId: string, nextMode: MicSourceMode) => {
+      setMicMode(nextMode);
+      setSelectedAudioDevice(deviceId);
+      saveMicSelection(nextMode, deviceId);
+      if (joined) {
+        await switchAudioDevice(deviceId);
+      }
+    },
+    [joined, switchAudioDevice]
+  );
+
+  const handleQuickStudioMicMode = useCallback(
+    async (targetMode: 'phone' | 'headphone') => {
+      let currentDevs = effectiveAudioDevices;
+      const refreshed = joined
+        ? await refreshAudioDevices()
+        : await rescanLobbyDevices();
+      if (refreshed.length > 0) {
+        currentDevs = refreshed;
+      }
+      const best = findBestMicForMode(currentDevs, targetMode);
+      const nextId =
+        targetMode === 'headphone'
+          ? best?.deviceId || selectedAudioDevice || ''
+          : best?.deviceId || '';
+      await handleSelectMic(nextId, targetMode);
+      if (targetMode === 'headphone') {
+        toast.success(
+          best?.label
+            ? `Switched to Headphone Mic (${best.label})`
+            : 'Headphone Mic mode active!'
+        );
+      } else {
+        toast.success(
+          best?.label
+            ? `Switched to Phone's Mic (${best.label})`
+            : "Switched to Phone's Built-in Mic!"
+        );
+      }
+    },
+    [
+      effectiveAudioDevices,
+      joined,
+      refreshAudioDevices,
+      rescanLobbyDevices,
+      selectedAudioDevice,
+      handleSelectMic,
+    ]
+  );
 
   // Start local high-resolution MediaRecorder
   const startLocalTrackRecorder = useCallback(
@@ -613,6 +751,9 @@ export function PageClientImpl(props: {
         };
 
         recorder.onstop = async () => {
+          if (mediaRecorderRef.current === recorder) {
+            mediaRecorderRef.current = null;
+          }
           const durationSec =
             (Date.now() - recordingStartTimeRef.current) / 1000;
           const mime = recorder.mimeType || mimeType;
@@ -1214,98 +1355,47 @@ export function PageClientImpl(props: {
                 />
               </div>
 
-              {/* Pocket Mic Level Meter Card */}
-              <div className="rounded-2xl bg-zinc-950 border border-white/10 p-3.5 space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setPreJoinAudio(!preJoinAudio)}
-                      className={`p-2.5 rounded-xl border transition ${
-                        preJoinAudio
-                          ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
-                          : 'bg-rose-500 border-rose-400 text-white'
-                      }`}
-                    >
-                      {preJoinAudio ? (
-                        <Mic className="w-4 h-4" />
-                      ) : (
-                        <MicOff className="w-4 h-4" />
-                      )}
-                    </button>
-                    <div>
-                      <p className="text-xs font-bold text-white">
-                        {preJoinAudio ? 'Microphone Active' : 'Microphone Muted'}
-                      </p>
-                      <p className="text-[10px] text-zinc-400">
-                        {smallRoomMode
-                          ? 'Hold phone 6â€“8 in. from mouth â€¢ Anti-bleed ON'
-                          : 'Speak to test your input level'}
-                      </p>
-                    </div>
-                  </div>
+              {/* Prominent Mobile Mic Selector: Phone's Mic vs Headphone Mic */}
+              <MicSelector
+                audioDevices={effectiveAudioDevices}
+                selectedDeviceId={selectedAudioDevice}
+                micMode={micMode}
+                activeHardwareLabel={effectiveActiveMicLabel}
+                audioEnabled={preJoinAudio}
+                audioLevel={previewLevel}
+                onSelectMic={handleSelectMic}
+                onToggleAudio={() => setPreJoinAudio(!preJoinAudio)}
+                onRescanDevices={rescanLobbyDevices}
+              />
 
-                  <button
-                    type="button"
-                    onClick={() => setShowHardwareSettings(!showHardwareSettings)}
-                    className="text-[11px] font-semibold text-rose-400 hover:underline"
-                  >
-                    {showHardwareSettings ? 'Hide Mic Select' : 'Change Mic'}
-                  </button>
+              {/* Compact Camera Toggle Bar */}
+              <div className="flex items-center justify-between gap-2 px-3.5 py-2.5 rounded-2xl bg-zinc-950/90 border border-white/10">
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-zinc-200">
+                    Video Camera (Optional)
+                  </p>
+                  <p className="text-[10px] text-zinc-400 truncate">
+                    {preJoinVideo
+                      ? 'Camera preview enabled'
+                      : 'Audio-Only recommended on phones to save battery'}
+                  </p>
                 </div>
-
-                {/* High-Visibility Voice Meter Bar */}
-                <div className="h-3 w-full rounded-full bg-white/10 overflow-hidden p-0.5">
-                  <div
-                    className="h-full rounded-full bg-gradient-to-r from-emerald-400 via-amber-400 to-rose-500 transition-all duration-75"
-                    style={{ width: `${preJoinAudio ? Math.max(4, previewLevel) : 0}%` }}
-                  />
-                </div>
-
-                {showHardwareSettings && (
-                  <div className="pt-2 grid grid-cols-1 sm:grid-cols-2 gap-2.5 border-t border-white/10">
-                    <div>
-                      <label className="block text-[10px] text-zinc-400 mb-1">
-                        Microphone Input
-                      </label>
-                      <select
-                        value={selectedAudioDevice}
-                        onChange={(e) => setSelectedAudioDevice(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl bg-zinc-900 border border-white/10 text-xs text-zinc-200"
-                      >
-                        <option value="">Default Microphone</option>
-                        {audioDevices.map((d, i) => (
-                          <option key={d.deviceId || i} value={d.deviceId}>
-                            {d.label || `Microphone ${i + 1}`}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-[10px] text-zinc-400 mb-1">
-                        Camera (Optional in Small Room)
-                      </label>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setPreJoinVideo(!preJoinVideo)}
-                          className={`px-3 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 ${
-                            preJoinVideo
-                              ? 'bg-sky-500/20 border-sky-500/40 text-sky-300'
-                              : 'bg-zinc-900 border-white/10 text-zinc-400'
-                          }`}
-                        >
-                          {preJoinVideo ? (
-                            <Video className="w-3.5 h-3.5" />
-                          ) : (
-                            <VideoOff className="w-3.5 h-3.5" />
-                          )}
-                          {preJoinVideo ? 'Camera ON' : 'Audio-Only (Saves Battery)'}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
+                <button
+                  type="button"
+                  onClick={() => setPreJoinVideo(!preJoinVideo)}
+                  className={`px-3 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 shrink-0 transition active:scale-95 ${
+                    preJoinVideo
+                      ? 'bg-sky-500/20 border-sky-500/40 text-sky-300'
+                      : 'bg-zinc-900 border-white/10 text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  {preJoinVideo ? (
+                    <Video className="w-3.5 h-3.5" />
+                  ) : (
+                    <VideoOff className="w-3.5 h-3.5" />
+                  )}
+                  <span>{preJoinVideo ? 'Camera ON' : 'Audio-Only'}</span>
+                </button>
               </div>
 
               {/* Optional Video Preview only if user turned Camera ON */}
@@ -1444,6 +1534,10 @@ export function PageClientImpl(props: {
   // ============================================================================
   const totalParticipants = 1 + remoteParticipants.length;
   const isStudioRecording = !!(roomData?.isRecording || isLocalRecording);
+  const isUsingHeadphoneMic =
+    micMode === 'headphone' ||
+    classifyMicLabel(effectiveActiveMicLabel, selectedAudioDevice).category ===
+      'headphone';
 
   return (
     <div className="h-[100dvh] w-full overflow-hidden bg-[#090a0f] text-zinc-100 flex flex-col">
@@ -1592,91 +1686,137 @@ export function PageClientImpl(props: {
           }`}
         >
           <div className="space-y-3.5 max-w-6xl w-full mx-auto my-auto">
-            {/* Dedicated Small-Room Field Recorder Card for THIS Phone's Mic */}
-            {smallRoomMode && (
-              <div
-                className={`rounded-2xl sm:rounded-3xl p-4 sm:p-5 border transition shadow-2xl ${
-                  isStudioRecording
-                    ? 'bg-gradient-to-br from-rose-950/50 via-zinc-900 to-zinc-950 border-rose-500/40'
-                    : 'bg-zinc-900/90 border-emerald-500/30'
-                }`}
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-                  <div className="flex items-center gap-2.5">
-                    <div
-                      className={`w-10 h-10 rounded-2xl flex items-center justify-center font-bold text-sm ${
-                        audioEnabled
-                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                          : 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
-                      }`}
-                    >
-                      {audioEnabled ? (
-                        <Mic className="w-5 h-5" />
-                      ) : (
-                        <MicOff className="w-5 h-5" />
-                      )}
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h2 className="text-sm sm:text-base font-extrabold text-white">
-                          {effectiveDisplayName} â€” Pocket Field Recorder
-                        </h2>
-                        <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                          Speakers Muted
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-zinc-400">
-                        {isStudioRecording
-                          ? 'Recording isolated 48kHz stem directly on this device â€¢ Zero feedback'
-                          : 'Small-Room Anti-Feedback active â€¢ Ready to record'}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-mono font-bold px-2.5 py-1 rounded-xl bg-black/50 border border-white/10 text-emerald-400">
-                      Input: {audioEnabled ? `${audioLevel}%` : 'MUTED'}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Large 24-Bar Studio Waveform Meter for easy viewing on a table in a small room */}
-                <div className="h-14 sm:h-16 rounded-2xl bg-black/60 border border-white/10 px-4 py-2.5 flex items-end justify-between gap-1">
-                  {waveformBars.map((val, i) => {
-                    const barHeight = audioEnabled ? Math.max(12, val) : 8;
-                    const isHot = val > 80;
-                    const isMid = val > 45;
-                    return (
-                      <span
-                        key={i}
-                        style={{ height: `${barHeight}%` }}
-                        className={`flex-1 rounded-full transition-all duration-75 ${
-                          !audioEnabled
-                            ? 'bg-zinc-700'
-                            : isHot
-                            ? 'bg-rose-500'
-                            : isMid
-                            ? 'bg-amber-400'
-                            : 'bg-emerald-400'
-                        }`}
-                      />
-                    );
-                  })}
-                </div>
-
-                {/* Show Notes Teleprompter Strip right inside the Recorder Card if present */}
-                {roomData?.description && (
-                  <div className="mt-3 pt-2.5 border-t border-white/10 flex items-start justify-between gap-2 text-xs text-zinc-300">
-                    <div>
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-rose-400 mr-2">
-                        Show Notes:
+            {/* Dedicated Field Recorder & Mic Selector Card for THIS Phone */}
+            <div
+              className={`rounded-2xl sm:rounded-3xl p-3.5 sm:p-5 border transition shadow-2xl ${
+                isStudioRecording
+                  ? 'bg-gradient-to-br from-rose-950/50 via-zinc-900 to-zinc-950 border-rose-500/40'
+                  : 'bg-zinc-900/90 border-emerald-500/30'
+              }`}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <button
+                    type="button"
+                    onClick={toggleAudio}
+                    className={`w-10 h-10 rounded-2xl flex items-center justify-center font-bold text-sm shrink-0 transition active:scale-95 ${
+                      audioEnabled
+                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                        : 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                    }`}
+                  >
+                    {audioEnabled ? (
+                      <Mic className="w-5 h-5" />
+                    ) : (
+                      <MicOff className="w-5 h-5" />
+                    )}
+                  </button>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <h2 className="text-sm sm:text-base font-extrabold text-white truncate">
+                        {effectiveDisplayName}
+                      </h2>
+                      <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                        {smallRoomMode ? 'Speakers Muted' : 'Remote Call'}
                       </span>
-                      <span>{roomData.description}</span>
                     </div>
+                    <p className="text-[11px] text-zinc-400 truncate">
+                      Active Mic:{' '}
+                      <span className="text-zinc-200 font-semibold">
+                        {effectiveActiveMicLabel ||
+                          (isUsingHeadphoneMic
+                            ? 'Headphone Mic'
+                            : "Phone's Built-in Mic")}
+                      </span>
+                    </p>
                   </div>
-                )}
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-mono font-bold px-2.5 py-1 rounded-xl bg-black/50 border border-white/10 text-emerald-400">
+                    Input: {audioEnabled ? `${audioLevel}%` : 'MUTED'}
+                  </span>
+                </div>
               </div>
-            )}
+
+              {/* 1-Tap Quick Mic Source Switcher right on the Studio Recorder Card */}
+              <div className="mb-3 p-2 rounded-2xl bg-black/50 border border-white/10 flex flex-wrap items-center justify-between gap-2">
+                <span className="text-[11px] font-bold text-zinc-300 pl-1">
+                  Mic Source:
+                </span>
+                <div className="flex items-center gap-1.5 flex-1 sm:flex-initial justify-end">
+                  <button
+                    type="button"
+                    onClick={() => handleQuickStudioMicMode('phone')}
+                    className={`flex-1 sm:flex-initial py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 border transition active:scale-95 ${
+                      !isUsingHeadphoneMic
+                        ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300 shadow'
+                        : 'bg-zinc-900 border-white/10 text-zinc-400 hover:text-white'
+                    }`}
+                  >
+                    <Smartphone className="w-3.5 h-3.5 shrink-0" />
+                    <span>Phone&apos;s Mic</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleQuickStudioMicMode('headphone')}
+                    className={`flex-1 sm:flex-initial py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 border transition active:scale-95 ${
+                      isUsingHeadphoneMic
+                        ? 'bg-amber-500/20 border-amber-500/50 text-amber-300 shadow'
+                        : 'bg-zinc-900 border-white/10 text-zinc-400 hover:text-white'
+                    }`}
+                  >
+                    <Headphones className="w-3.5 h-3.5 shrink-0" />
+                    <span>Headphone Mic</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowStudioMicSheet(true)}
+                    title="View all detected microphones"
+                    className="py-2 px-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-semibold text-zinc-300 flex items-center gap-1 shrink-0 active:scale-95 transition"
+                  >
+                    <Sliders className="w-3.5 h-3.5 text-emerald-400" />
+                    <span className="hidden xs:inline">All Mics</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Large 24-Bar Studio Waveform Meter for easy viewing on a table in a small room */}
+              <div className="h-14 sm:h-16 rounded-2xl bg-black/60 border border-white/10 px-4 py-2.5 flex items-end justify-between gap-1">
+                {waveformBars.map((val, i) => {
+                  const barHeight = audioEnabled ? Math.max(12, val) : 8;
+                  const isHot = val > 80;
+                  const isMid = val > 45;
+                  return (
+                    <span
+                      key={i}
+                      style={{ height: `${barHeight}%` }}
+                      className={`flex-1 rounded-full transition-all duration-75 ${
+                        !audioEnabled
+                          ? 'bg-zinc-700'
+                          : isHot
+                          ? 'bg-rose-500'
+                          : isMid
+                          ? 'bg-amber-400'
+                          : 'bg-emerald-400'
+                      }`}
+                    />
+                  );
+                })}
+              </div>
+
+              {/* Show Notes Teleprompter Strip right inside the Recorder Card if present */}
+              {roomData?.description && (
+                <div className="mt-3 pt-2.5 border-t border-white/10 flex items-start justify-between gap-2 text-xs text-zinc-300">
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-rose-400 mr-2">
+                      Show Notes:
+                    </span>
+                    <span>{roomData.description}</span>
+                  </div>
+                </div>
+              )}
+            </div>
 
             {/* Room Participants Grid */}
             <div
@@ -1688,21 +1828,29 @@ export function PageClientImpl(props: {
                   : 'grid-cols-2 lg:grid-cols-3'
               }`}
             >
-              {/* Local User Tile */}
-              <VideoStreamTile
-                stream={isScreenSharing ? screenStream : localStream}
-                muted={true}
-                videoEnabled={videoEnabled}
-                displayName={effectiveDisplayName}
-                photoURL={user?.photoURL}
-                role={isHost ? 'host' : 'guest'}
-                audioEnabled={audioEnabled}
-                isRecording={isStudioRecording}
-                isScreenSharing={isScreenSharing}
-                waveformBars={waveformBars}
-                isLocal={true}
-                smallRoomMode={smallRoomMode}
-              />
+              {/* Local User Video Tile (Hidden on mobile when camera/screenshare is off since Pocket Field Recorder card is above) */}
+              <div
+                className={
+                  videoEnabled || isScreenSharing
+                    ? 'block'
+                    : 'hidden lg:block'
+                }
+              >
+                <VideoStreamTile
+                  stream={isScreenSharing ? screenStream : localStream}
+                  muted={true}
+                  videoEnabled={videoEnabled}
+                  displayName={effectiveDisplayName}
+                  photoURL={user?.photoURL}
+                  role={isHost ? 'host' : 'guest'}
+                  audioEnabled={audioEnabled}
+                  isRecording={isStudioRecording}
+                  isScreenSharing={isScreenSharing}
+                  waveformBars={waveformBars}
+                  isLocal={true}
+                  smallRoomMode={smallRoomMode}
+                />
+              </div>
 
               {/* Other Members in the Room */}
               {remoteParticipants.map((part: StudioParticipant) => (
@@ -1722,6 +1870,36 @@ export function PageClientImpl(props: {
                 />
               ))}
             </div>
+
+            {remoteParticipants.length === 0 && (
+              <div className="rounded-2xl bg-zinc-900/60 border border-white/10 p-3.5 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-zinc-200">
+                    Waiting for co-hosts to join on their phones
+                  </p>
+                  <p className="text-[11px] text-zinc-400 truncate">
+                    Room Code: <span className="font-mono text-white">{props.roomName}</span>
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCopyInvite}
+                  className="px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-xs font-bold text-white flex items-center gap-1.5 shrink-0 active:scale-95 transition"
+                >
+                  {copiedLink ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Copied</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5 text-rose-400" />
+                      <span>Share Link</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -1786,60 +1964,109 @@ export function PageClientImpl(props: {
         </aside>
       </div>
 
+      {/* Mobile Mic Selector Bottom Sheet (Accessible anytime inside the Studio) */}
+      {showStudioMicSheet && (
+        <div
+          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4"
+          onClick={() => setShowStudioMicSheet(false)}
+        >
+          <div
+            className="w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl bg-zinc-900 border-t sm:border border-white/15 p-4 sm:p-5 pb-safe space-y-3.5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-10 h-1.5 rounded-full bg-white/20 mx-auto sm:hidden" />
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-extrabold text-white">
+                  Switch Studio Microphone
+                </h3>
+                <p className="text-[11px] text-zinc-400">
+                  Choose between your Phone&apos;s Mic or Headphone Mic
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowStudioMicSheet(false)}
+                className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-zinc-300"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <MicSelector
+              audioDevices={effectiveAudioDevices}
+              selectedDeviceId={selectedAudioDevice}
+              micMode={micMode}
+              activeHardwareLabel={effectiveActiveMicLabel}
+              audioEnabled={audioEnabled}
+              audioLevel={audioLevel}
+              onSelectMic={async (devId, mode) => {
+                await handleSelectMic(devId, mode);
+              }}
+              onToggleAudio={toggleAudio}
+              onRescanDevices={refreshAudioDevices}
+            />
+
+            <button
+              type="button"
+              onClick={() => setShowStudioMicSheet(false)}
+              className="w-full py-3 rounded-2xl btn-acid text-xs sm:text-sm font-extrabold"
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Thumb-Friendly Mobile-First Bottom Studio Control Dock */}
-      <footer className="border-t border-white/10 bg-zinc-950/95 backdrop-blur-xl px-3 py-2.5 pb-safe shrink-0">
-        <div className="max-w-3xl mx-auto flex items-center justify-between sm:justify-center gap-2 sm:gap-3">
-          {/* Mic Toggle */}
+      <footer className="border-t border-white/10 bg-zinc-950/95 backdrop-blur-xl px-2.5 sm:px-4 py-2.5 pb-safe shrink-0">
+        <div className="max-w-3xl mx-auto flex items-center justify-between sm:justify-center gap-1.5 sm:gap-2.5">
+          {/* Mic Mute Toggle */}
           <button
             onClick={toggleAudio}
-            className={`px-3.5 py-3 rounded-2xl font-bold text-xs flex items-center justify-center gap-1.5 transition ${
+            title={audioEnabled ? 'Mute Microphone' : 'Unmute Microphone'}
+            className={`px-3 py-3 rounded-2xl font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 ${
               audioEnabled
                 ? 'bg-white/10 hover:bg-white/15 text-white'
                 : 'bg-rose-500/20 border border-rose-500/40 text-rose-400'
             }`}
           >
             {audioEnabled ? (
-              <Mic className="w-4 h-4 text-emerald-400" />
+              <Mic className="w-4 h-4 text-emerald-400 shrink-0" />
             ) : (
-              <MicOff className="w-4 h-4 text-rose-400" />
+              <MicOff className="w-4 h-4 text-rose-400 shrink-0" />
             )}
-            <span className="hidden xs:inline">
+            <span className="hidden sm:inline">
               {audioEnabled ? 'Mic On' : 'Muted'}
             </span>
           </button>
 
-          {/* Speaker / Monitoring Mute Toggle */}
+          {/* Mic Source Selector Button (Phone's Mic vs Headphone Mic) */}
           <button
-            onClick={() => {
-              if (smallRoomMode) {
-                toast(
-                  'Speakers stay muted in Small-Room Mode to prevent audio feedback.',
-                  { icon: 'ðŸ”‡' }
-                );
-              } else {
-                setSpeakerMuted(!speakerMuted);
-              }
-            }}
-            className={`px-3 py-3 rounded-2xl font-bold text-xs flex items-center justify-center gap-1.5 transition ${
-              smallRoomMode || speakerMuted
-                ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-300'
-                : 'bg-white/10 hover:bg-white/15 text-white'
+            type="button"
+            onClick={() => setShowStudioMicSheet(true)}
+            title="Switch between Phone's Mic and Headphone Mic"
+            className={`px-2.5 sm:px-3.5 py-3 rounded-2xl border font-bold text-xs flex items-center justify-center gap-1 transition active:scale-95 ${
+              isUsingHeadphoneMic
+                ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
+                : 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
             }`}
           >
-            {smallRoomMode || speakerMuted ? (
-              <VolumeX className="w-4 h-4 text-emerald-400" />
+            {isUsingHeadphoneMic ? (
+              <Headphones className="w-4 h-4 shrink-0" />
             ) : (
-              <Volume2 className="w-4 h-4 text-violet-400" />
+              <Smartphone className="w-4 h-4 shrink-0" />
             )}
-            <span className="hidden sm:inline">
-              {smallRoomMode || speakerMuted ? 'Monitor OFF' : 'Monitor ON'}
+            <span className="text-[11px] sm:text-xs">
+              {isUsingHeadphoneMic ? 'Headphone' : 'Phone Mic'}
             </span>
+            <ChevronDown className="w-3 h-3 opacity-80 shrink-0" />
           </button>
 
           {/* Giant Center Master Record / Stop Button */}
           <button
             onClick={handleToggleMasterRecording}
-            className={`flex-1 sm:flex-initial px-5 py-3.5 rounded-2xl font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 transition shadow-xl active:scale-[0.98] ${
+            className={`flex-1 sm:flex-initial px-4 sm:px-5 py-3.5 rounded-2xl font-extrabold text-xs sm:text-sm flex items-center justify-center gap-1.5 sm:gap-2 transition shadow-xl active:scale-[0.98] ${
               isStudioRecording
                 ? 'bg-zinc-100 text-zinc-950 hover:bg-white shadow-white/10'
                 : 'bg-gradient-to-r from-rose-500 to-orange-500 hover:from-rose-600 hover:to-orange-600 text-white shadow-rose-500/30'
@@ -1848,29 +2075,59 @@ export function PageClientImpl(props: {
             {isStudioRecording ? (
               <>
                 <Square className="w-4 h-4 fill-rose-600 text-rose-600 shrink-0" />
-                <span>Stop Record ({formatDuration(recordingSeconds)})</span>
+                <span>Stop ({formatDuration(recordingSeconds)})</span>
               </>
             ) : (
               <>
                 <Radio className="w-4 h-4 shrink-0" />
-                <span>Master Record</span>
+                <span>Record</span>
               </>
             )}
+          </button>
+
+          {/* Speaker / Monitoring Mute Toggle */}
+          <button
+            onClick={() => {
+              if (smallRoomMode) {
+                toast(
+                  'Speakers stay muted in Small-Room Mode to prevent audio feedback.',
+                  { icon: '🔇' }
+                );
+              } else {
+                setSpeakerMuted(!speakerMuted);
+              }
+            }}
+            title="Speaker Monitoring"
+            className={`px-2.5 sm:px-3 py-3 rounded-2xl font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 ${
+              smallRoomMode || speakerMuted
+                ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-300'
+                : 'bg-white/10 hover:bg-white/15 text-white'
+            }`}
+          >
+            {smallRoomMode || speakerMuted ? (
+              <VolumeX className="w-4 h-4 text-emerald-400 shrink-0" />
+            ) : (
+              <Volume2 className="w-4 h-4 text-violet-400 shrink-0" />
+            )}
+            <span className="hidden md:inline">
+              {smallRoomMode || speakerMuted ? 'Monitor OFF' : 'Monitor ON'}
+            </span>
           </button>
 
           {/* Camera Toggle */}
           <button
             onClick={toggleVideo}
-            className={`px-3.5 py-3 rounded-2xl font-semibold text-xs flex items-center justify-center gap-1.5 transition ${
+            title="Toggle Camera"
+            className={`hidden xs:flex px-2.5 sm:px-3.5 py-3 rounded-2xl font-semibold text-xs items-center justify-center gap-1.5 transition active:scale-95 ${
               videoEnabled
                 ? 'bg-sky-500/20 border border-sky-500/40 text-sky-300'
                 : 'bg-white/5 hover:bg-white/10 text-zinc-400'
             }`}
           >
             {videoEnabled ? (
-              <Video className="w-4 h-4 text-sky-400" />
+              <Video className="w-4 h-4 text-sky-400 shrink-0" />
             ) : (
-              <VideoOff className="w-4 h-4" />
+              <VideoOff className="w-4 h-4 shrink-0" />
             )}
             <span className="hidden md:inline">
               {videoEnabled ? 'Cam On' : 'Cam Off'}
@@ -1896,9 +2153,9 @@ export function PageClientImpl(props: {
               router.push('/');
             }}
             title="Leave Studio"
-            className="px-3.5 py-3 rounded-2xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-400 text-xs font-bold transition flex items-center justify-center gap-1"
+            className="px-3 py-3 rounded-2xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-400 text-xs font-bold transition flex items-center justify-center gap-1 active:scale-95"
           >
-            <PhoneOff className="w-4 h-4" />
+            <PhoneOff className="w-4 h-4 shrink-0" />
             <span className="hidden sm:inline">Leave</span>
           </button>
         </div>
