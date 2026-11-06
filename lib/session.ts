@@ -61,9 +61,11 @@ const FALLBACK_SECRET =
   'podmeet-studio-session-secret-default-key-min32chars-2026-safe-edge';
 
 function secretKey(): Uint8Array {
-  const s =
-    (typeof process !== 'undefined' ? process.env.AUTH_SESSION_SECRET : undefined) ||
-    FALLBACK_SECRET;
+  const envVal =
+    typeof process !== 'undefined' && process.env.AUTH_SESSION_SECRET
+      ? process.env.AUTH_SESSION_SECRET.trim()
+      : undefined;
+  const s = envVal || FALLBACK_SECRET;
   return new TextEncoder().encode(s.padEnd(32, '_'));
 }
 

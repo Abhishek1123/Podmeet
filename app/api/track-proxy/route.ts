@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
     return new NextResponse('Invalid url', { status: 400 });
   }
 
-  const bucket = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET;
+  const bucket = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET?.trim();
   const isAllowedHost = target.protocol === 'https:' && ALLOWED_HOSTS.has(target.hostname);
   const isOurBucket = !bucket || target.pathname.includes(`/${bucket}/`) || target.pathname.includes(`/b/${bucket}/`);
   if (!isAllowedHost || !isOurBucket) {

@@ -9,8 +9,9 @@ import {
   verifySessionToken,
 } from '@/lib/session';
 
-const PROJECT_ID =
-  process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || 'podmeet-app-studio';
+const PROJECT_ID = (
+  process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || 'podmeet-app-studio'
+).trim();
 
 const JWKS = createRemoteJWKSet(
   new URL(
