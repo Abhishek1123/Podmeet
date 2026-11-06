@@ -337,13 +337,13 @@ export function useWebRTCStudio(params: {
     ]
   );
 
-  // Lightweight heartbeat to sync live speaking level for visual meters in Small Room Mode
+  // Fast heartbeat to sync live speaking level for visual meters across all devices in Small Room Mode
   useEffect(() => {
     if (!joined || !roomId) return;
     let lastSyncedLevel = -1;
     const interval = setInterval(() => {
       const cur = audioEnabled ? audioLevelRef.current : 0;
-      if (Math.abs(cur - lastSyncedLevel) >= 8 || (cur === 0 && lastSyncedLevel !== 0)) {
+      if (Math.abs(cur - lastSyncedLevel) >= 5 || (cur === 0 && lastSyncedLevel !== 0)) {
         lastSyncedLevel = cur;
         const partRef = doc(db, 'rooms', roomId, 'participants', peerId);
         setDoc(
@@ -355,7 +355,7 @@ export function useWebRTCStudio(params: {
           { merge: true }
         ).catch(() => {});
       }
-    }, 850);
+    }, 350);
     return () => clearInterval(interval);
   }, [joined, roomId, peerId, audioEnabled]);
 

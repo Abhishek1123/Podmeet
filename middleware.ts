@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { SESSION_COOKIE, verifySessionToken } from '@/lib/session';
+import { SESSION_COOKIE, verifySessionToken, isAdminRole } from '@/lib/session';
 
 /** Everything requires an invited Google session except these. */
 const PUBLIC_PATHS = ['/login', '/api/auth/session', '/__/auth', '/__/firebase'];
 
-/** Only the super admin may open these. */
+/** Only super admins and sub admins may open these. */
 const ADMIN_ONLY = ['/admin'];
 
 const matches = (path: string, list: string[]) =>
@@ -27,7 +27,7 @@ export async function middleware(req: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  if (matches(pathname, ADMIN_ONLY) && !session.isSuperAdmin) {
+  if (matches(pathname, ADMIN_ONLY) && !isAdminRole(session.role, session.isSuperAdmin)) {
     const url = req.nextUrl.clone();
     url.pathname = '/';
     url.search = '';

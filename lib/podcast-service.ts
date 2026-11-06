@@ -38,7 +38,7 @@ export interface PodcastMember {
   id: string;
   name: string;
   email: string;
-  role: 'super_admin' | 'host' | 'co-host' | 'producer' | 'editor' | 'guest';
+  role: 'super_admin' | 'sub_admin' | 'admin' | 'host' | 'co-host' | 'producer' | 'editor' | 'guest';
   bio?: string;
   assignedRoomId?: string | null;
   addedBy: string;
@@ -50,10 +50,12 @@ export interface LobbyParticipant {
   uid: string;
   name: string;
   email?: string | null;
-  role: 'super_admin' | 'host' | 'co-host' | 'guest';
+  role: 'super_admin' | 'sub_admin' | 'admin' | 'host' | 'co-host' | 'guest';
   micReady: boolean;
   camReady: boolean;
   inStudio: boolean;
+  audioLevel?: number;
+  micMode?: 'phone' | 'headphone' | string;
   updatedAt: number;
 }
 
@@ -162,6 +164,16 @@ export async function addPodcastMember(params: {
 
 export async function removePodcastMember(memberId: string) {
   await deleteDoc(doc(db, 'members', memberId));
+}
+
+export async function updatePodcastMemberRole(
+  memberId: string,
+  role: PodcastMember['role']
+) {
+  await updateDoc(doc(db, 'members', memberId), {
+    role,
+    updatedAt: Date.now(),
+  });
 }
 
 export function subscribeToPodcastMembers(
@@ -317,12 +329,16 @@ export async function ensurePodcastRoomExists(
   roomId: string,
   userId: string,
   userName: string,
-  photoURL?: string | null
+  photoURL?: string | null,
+  isSuperAdmin?: boolean
 ): Promise<PodcastRoom> {
   const ref = doc(db, 'rooms', roomId);
   const snap = await getDoc(ref);
   if (snap.exists()) {
     return snap.data() as PodcastRoom;
+  }
+  if (!isSuperAdmin) {
+    throw new Error('Studio room not found. Only super admins can create new rooms.');
   }
   return createPodcastRoom({
     roomId,

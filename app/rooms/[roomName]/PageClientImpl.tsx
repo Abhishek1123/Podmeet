@@ -75,6 +75,7 @@ import {
 } from '@/lib/local-recorder';
 import { useWebRTCStudio, StudioParticipant } from '@/lib/useWebRTCStudio';
 import { playPodcastSoundEffect } from '@/lib/soundboard';
+import { shareLobbyLink } from '@/lib/share-utils';
 import toast from 'react-hot-toast';
 
 function formatDuration(sec: number): string {
@@ -121,13 +122,14 @@ function VideoStreamTile({
   remoteAudioLevel,
   isLocal,
   smallRoomMode,
+  micMode,
 }: {
   stream: MediaStream | null | undefined;
   muted: boolean;
   videoEnabled: boolean;
   displayName: string;
   photoURL?: string | null;
-  role: 'host' | 'guest';
+  role: 'host' | 'guest' | string;
   audioEnabled: boolean;
   isRecording: boolean;
   isScreenSharing?: boolean;
@@ -135,6 +137,7 @@ function VideoStreamTile({
   remoteAudioLevel?: number;
   isLocal?: boolean;
   smallRoomMode?: boolean;
+  micMode?: string;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -153,12 +156,19 @@ function VideoStreamTile({
     stream.getVideoTracks().length > 0 &&
     (videoEnabled || isScreenSharing);
 
+  const currentLevel = audioEnabled ? (remoteAudioLevel ?? 0) : 0;
+  const isSpeaking = currentLevel > 14;
+  const isHot = currentLevel > 80;
+  const isWarm = currentLevel > 60;
+
   const bars =
     waveformBars ||
-    buildSyntheticBars(audioEnabled ? remoteAudioLevel ?? 18 : 6);
+    buildSyntheticBars(audioEnabled ? (currentLevel > 0 ? currentLevel : 18) : 6);
 
   return (
-    <div className="relative rounded-2xl sm:rounded-3xl bg-zinc-900/90 border border-white/10 overflow-hidden flex flex-col justify-between min-h-[136px] sm:min-h-[168px] sm:aspect-video shadow-xl group">
+    <div className={`relative rounded-2xl sm:rounded-3xl bg-zinc-900/90 border transition-all duration-150 overflow-hidden flex flex-col justify-between min-h-[148px] sm:min-h-[178px] sm:aspect-video shadow-xl group ${
+      isSpeaking ? 'border-emerald-500/60 ring-2 ring-emerald-400/40 shadow-emerald-500/10' : 'border-white/10'
+    }`}>
       {hasVideoTrack ? (
         <video
           ref={videoRef}
@@ -183,36 +193,49 @@ function VideoStreamTile({
             />
           )}
           <div className="relative">
-            {audioEnabled && (
-              <div className="absolute -inset-2.5 rounded-full bg-emerald-500/20 animate-pulse blur-md" />
+            {isSpeaking && (
+              <div className="absolute -inset-3 rounded-full bg-emerald-500/30 animate-pulse blur-md" />
             )}
             {photoURL ? (
               <img
                 src={photoURL}
                 alt={displayName}
-                className="relative w-14 h-14 sm:w-20 sm:h-20 rounded-full object-cover ring-4 ring-white/10 shadow-xl"
+                className={`relative w-14 h-14 sm:w-20 sm:h-20 rounded-full object-cover ring-4 shadow-xl transition-all ${
+                  isSpeaking ? 'ring-emerald-400' : 'ring-white/10'
+                }`}
               />
             ) : (
-              <div className="relative w-14 h-14 sm:w-20 sm:h-20 rounded-full bg-gradient-to-tr from-rose-500 to-violet-600 flex items-center justify-center text-xl sm:text-2xl font-extrabold text-white ring-4 ring-white/10 shadow-xl">
+              <div className={`relative w-14 h-14 sm:w-20 sm:h-20 rounded-full bg-gradient-to-tr from-rose-500 to-violet-600 flex items-center justify-center text-xl sm:text-2xl font-extrabold text-white ring-4 shadow-xl transition-all ${
+                isSpeaking ? 'ring-emerald-400' : 'ring-white/10'
+              }`}>
                 {(displayName || 'P')[0].toUpperCase()}
               </div>
             )}
           </div>
           <p className="mt-2.5 text-xs sm:text-sm font-bold text-zinc-100 text-center truncate max-w-full">
-            {displayName} {isLocal ? '(Your Phone Mic)' : ''}
+            {displayName} {isLocal ? '(You)' : ''}
           </p>
-          <p className="text-[10px] sm:text-[11px] text-zinc-400 flex items-center gap-1 mt-0.5">
+          <div className="flex items-center gap-1.5 mt-0.5">
             {smallRoomMode ? (
-              <>
+              <span className="text-[10px] sm:text-[11px] text-zinc-400 flex items-center gap-1">
                 <VolumeX className="w-3 h-3 text-emerald-400" />
-                <span>Record Only â€¢ Speaker Muted</span>
-              </>
+                <span>Speakers Muted</span>
+              </span>
             ) : audioEnabled ? (
-              '48kHz Studio Audio Active'
+              <span className="text-[10px] sm:text-[11px] text-zinc-400">
+                48kHz Audio Active
+              </span>
             ) : (
-              'Microphone Muted'
+              <span className="text-[10px] sm:text-[11px] text-rose-400">
+                Microphone Muted
+              </span>
             )}
-          </p>
+            {micMode && (
+              <span className="text-[9px] px-1.5 py-0.2 rounded bg-white/5 text-zinc-300 font-medium">
+                {micMode === 'headphone' ? '🎧 Headphone' : '📱 Phone Mic'}
+              </span>
+            )}
+          </div>
         </div>
       )}
 
@@ -221,17 +244,21 @@ function VideoStreamTile({
         <div className="flex items-center gap-1.5 flex-wrap">
           <span
             className={`px-2 py-0.5 rounded-lg text-[9px] sm:text-[10px] font-bold uppercase tracking-wider backdrop-blur-md border ${
-              role === 'host'
+              role === 'super_admin'
+                ? 'bg-amber-500/25 text-amber-300 border-amber-500/40'
+                : role === 'sub_admin'
+                ? 'bg-violet-500/25 text-violet-300 border-violet-500/40'
+                : role === 'host'
                 ? 'bg-rose-500/25 text-rose-300 border-rose-500/40'
-                : 'bg-violet-500/25 text-violet-300 border-violet-500/40'
+                : 'bg-zinc-800/80 text-zinc-300 border-white/10'
             }`}
           >
-            {role === 'host' ? 'Host' : 'Co-Host'}
+            {role === 'super_admin' ? 'Super Admin' : role === 'sub_admin' ? 'Sub Admin' : role === 'host' ? 'Host' : 'Co-Host'}
           </span>
           {smallRoomMode && (
             <span className="px-2 py-0.5 rounded-lg text-[9px] sm:text-[10px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 backdrop-blur-md flex items-center gap-1">
               <VolumeX className="w-2.5 h-2.5" />
-              No Feedback
+              Zero Feedback
             </span>
           )}
         </div>
@@ -246,11 +273,11 @@ function VideoStreamTile({
         )}
       </div>
 
-      {/* Bottom Participant Bar + Live Waveform */}
-      <div className="absolute bottom-2.5 left-2.5 right-2.5 flex items-center justify-between px-3 py-1.5 rounded-xl bg-black/70 backdrop-blur-md border border-white/10">
+      {/* Bottom Participant Bar + Live Waveform & Numerical Level */}
+      <div className="absolute bottom-2.5 left-2.5 right-2.5 flex items-center justify-between px-3 py-1.5 rounded-xl bg-black/75 backdrop-blur-md border border-white/10 gap-2">
         <div className="flex items-center gap-1.5 min-w-0">
           {audioEnabled ? (
-            <Mic className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+            <Mic className={`w-3.5 h-3.5 shrink-0 ${isSpeaking ? 'text-emerald-400' : 'text-zinc-400'}`} />
           ) : (
             <MicOff className="w-3.5 h-3.5 text-rose-400 shrink-0" />
           )}
@@ -259,19 +286,51 @@ function VideoStreamTile({
           </span>
         </div>
 
-        {/* Live Waveform Visualizer */}
-        <div className="flex items-end gap-[2px] h-3.5 shrink-0">
-          {bars.slice(0, 12).map((val, i) => (
-            <span
-              key={i}
-              style={{
-                height: `${audioEnabled ? Math.max(15, val) : 12}%`,
-              }}
-              className={`w-[2.5px] rounded-full transition-all duration-75 ${
-                audioEnabled ? 'bg-emerald-400' : 'bg-zinc-600'
-              }`}
-            />
-          ))}
+        {/* Individual Mic Level readout & animated Waveform fallback */}
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Numerical Mic Level Meter */}
+          <div className="flex items-center gap-1">
+            <div className="w-12 h-1.5 rounded-full bg-zinc-800 overflow-hidden">
+              <div
+                className={`h-full transition-all duration-75 ${
+                  !audioEnabled
+                    ? 'bg-rose-500'
+                    : isHot
+                    ? 'bg-rose-500'
+                    : isWarm
+                    ? 'bg-amber-400'
+                    : 'bg-emerald-400'
+                }`}
+                style={{ width: `${audioEnabled ? Math.max(isSpeaking ? 15 : 4, currentLevel) : 0}%` }}
+              />
+            </div>
+            <span className={`font-mono text-[10px] font-bold ${
+              !audioEnabled
+                ? 'text-rose-400'
+                : isHot
+                ? 'text-rose-400'
+                : isWarm
+                ? 'text-amber-400'
+                : 'text-emerald-400'
+            }`}>
+              {audioEnabled ? `${currentLevel}%` : 'MUTE'}
+            </span>
+          </div>
+
+          {/* Live Waveform Visualizer */}
+          <div className="flex items-end gap-[2px] h-3.5 shrink-0">
+            {bars.slice(0, 10).map((val, i) => (
+              <span
+                key={i}
+                style={{
+                  height: `${audioEnabled ? Math.max(15, val) : 12}%`,
+                }}
+                className={`w-[2.5px] rounded-full transition-all duration-75 ${
+                  audioEnabled ? (isSpeaking ? 'bg-emerald-400' : 'bg-zinc-500') : 'bg-zinc-700'
+                }`}
+              />
+            ))}
+          </div>
         </div>
       </div>
     </div>
@@ -292,7 +351,7 @@ export function PageClientImpl(props: {
   const memberEmailParam = searchParams?.get('email') || '';
   const modeParam = searchParams?.get('mode');
 
-  const { user, isSuperAdmin } = useAuth();
+  const { user, isSuperAdmin, isSubAdmin, isAdmin } = useAuth();
 
   // Stable Lobby Presence ID for this tab
   const [lobbyClientId] = useState(
@@ -373,6 +432,7 @@ export function PageClientImpl(props: {
 
   const isHost = Boolean(
     isSuperAdmin ||
+      isSubAdmin ||
       !roomData ||
       (user && roomData.hostId === user.uid) ||
       roomData.hostId === 'anon-host'
@@ -441,29 +501,39 @@ export function PageClientImpl(props: {
     }
   };
 
-  // Sync this member's Lobby Presence in Firestore
+  // Sync this member's Lobby Presence & Live Mic Level in Firestore so all waiting members see each other's mic level
   useEffect(() => {
     if (!props.roomName) return;
-    updateLobbyPresence(props.roomName, {
-      id: lobbyClientId,
-      uid: user?.uid || lobbyClientId,
-      name: effectiveDisplayName,
-      email:
-        memberEmailParam ||
-        user?.email ||
-        (isSuperAdmin ? SUPER_ADMIN_EMAIL : null),
-      role: isSuperAdmin ? 'super_admin' : isHost ? 'host' : 'co-host',
-      micReady: preJoinAudio,
-      camReady: preJoinVideo,
-      inStudio: joined,
-      updatedAt: Date.now(),
-    }).catch(() => {});
+
+    const syncPresence = () => {
+      const curLevel = preJoinAudio ? previewLevel : 0;
+      updateLobbyPresence(props.roomName, {
+        id: lobbyClientId,
+        uid: user?.uid || lobbyClientId,
+        name: effectiveDisplayName,
+        email:
+          memberEmailParam ||
+          user?.email ||
+          (isSuperAdmin ? SUPER_ADMIN_EMAIL : null),
+        role: isSuperAdmin ? 'super_admin' : isSubAdmin ? 'sub_admin' : isHost ? 'host' : 'co-host',
+        micReady: preJoinAudio,
+        camReady: preJoinVideo,
+        inStudio: joined,
+        audioLevel: curLevel,
+        micMode: micMode,
+        updatedAt: Date.now(),
+      }).catch(() => {});
+    };
+
+    syncPresence();
+    const interval = setInterval(syncPresence, 500);
 
     const handleUnload = () => {
       removeLobbyPresence(props.roomName, lobbyClientId);
     };
     window.addEventListener('beforeunload', handleUnload);
     return () => {
+      clearInterval(interval);
       window.removeEventListener('beforeunload', handleUnload);
     };
   }, [
@@ -474,21 +544,43 @@ export function PageClientImpl(props: {
     effectiveDisplayName,
     memberEmailParam,
     isSuperAdmin,
+    isSubAdmin,
     isHost,
     preJoinAudio,
     preJoinVideo,
+    previewLevel,
+    micMode,
     joined,
   ]);
 
-  // Auto-transition from Green Room Lobby into Live Studio when Master Record is triggered!
+  // Track when this participant arrived in the lobby so we only auto-transition them
+  // if the Master Record is triggered while they are waiting in the lobby.
+  const mountedAtRef = useRef<number>(0);
+  useEffect(() => {
+    mountedAtRef.current = Date.now();
+  }, []);
+
+  // Auto-transition from Green Room Lobby into Live Studio when Master Record is triggered while waiting!
   useEffect(() => {
     if (!joined && roomData?.sessionLive && roomData?.isRecording) {
-      toast.success(
-        'Master Recording started! Your phone is now recording isolated 48kHz audio.'
-      );
-      setJoined(true);
+      const recStarted = roomData.recordingStartedAt || 0;
+      const startedWhileWaiting =
+        recStarted > 0 && recStarted >= mountedAtRef.current - 2500;
+
+      if (startedWhileWaiting) {
+        toast.success(
+          'Master Recording started! Your phone is now recording isolated 48kHz audio.',
+          { icon: '🔴' }
+        );
+        setJoined(true);
+      }
     }
-  }, [joined, roomData?.sessionLive, roomData?.isRecording]);
+  }, [
+    joined,
+    roomData?.sessionLive,
+    roomData?.isRecording,
+    roomData?.recordingStartedAt,
+  ]);
 
   const rescanLobbyDevices = useCallback(async () => {
     try {
@@ -874,43 +966,68 @@ export function PageClientImpl(props: {
 
   // Master Record Button directly inside the Green Room Lobby!
   const handleStartMasterRecordFromLobby = async () => {
-    let currentUser = user;
-    await ensurePodcastRoomExists(
-      props.roomName,
-      currentUser?.uid || 'admin',
-      effectiveDisplayName,
-      currentUser?.photoURL || null
-    );
-    await setRoomRecordingMode(
-      props.roomName,
-      smallRoomMode ? 'small-room' : 'remote'
-    );
-    const sessionId = `master_ep_${Date.now()}`;
-    await triggerMasterLobbyRecordingSession(props.roomName, sessionId);
-    setJoined(true);
-    toast.success(
-      'Master Recording launched for all phones in the room!'
-    );
+    try {
+      let currentUser = user;
+      await ensurePodcastRoomExists(
+        props.roomName,
+        currentUser?.uid || 'admin',
+        effectiveDisplayName,
+        currentUser?.photoURL || null,
+        isSuperAdmin
+      );
+      await setRoomRecordingMode(
+        props.roomName,
+        smallRoomMode ? 'small-room' : 'remote'
+      );
+      const sessionId = `master_ep_${Date.now()}`;
+      await triggerMasterLobbyRecordingSession(props.roomName, sessionId);
+      setJoined(true);
+      toast.success(
+        'Master Recording launched for all phones in the room!'
+      );
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err?.message || 'Failed to start recording. Only super admins can create new rooms.');
+    }
   };
 
   const handleEnterStudio = async (e: React.FormEvent) => {
     e.preventDefault();
-    let currentUser = user;
-    await ensurePodcastRoomExists(
-      props.roomName,
-      currentUser?.uid || 'guest',
-      effectiveDisplayName,
-      currentUser?.photoURL || null
-    );
-    setJoined(true);
+    try {
+      let currentUser = user;
+      await ensurePodcastRoomExists(
+        props.roomName,
+        currentUser?.uid || 'guest',
+        effectiveDisplayName,
+        currentUser?.photoURL || null,
+        isSuperAdmin
+      );
+      setJoined(true);
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err?.message || 'This room does not exist. Only super admins can create new rooms.');
+    }
   };
 
-  const handleCopyInvite = () => {
-    const url = `${window.location.origin}/rooms/${props.roomName}`;
-    navigator.clipboard.writeText(url);
-    setCopiedLink(true);
-    toast.success('Room link copied! Share with everyone in the room.');
-    setTimeout(() => setCopiedLink(false), 2500);
+  const handleCopyInvite = async () => {
+    const result = await shareLobbyLink({
+      roomId: props.roomName,
+      roomTitle: roomData?.title,
+      mode: smallRoomMode ? 'small-room' : 'remote',
+    });
+
+    if (result.success) {
+      setCopiedLink(true);
+      if (result.method === 'clipboard') {
+        toast.success(
+          'Studio Lobby link copied! Everyone in the room can open it on their phone.',
+          { icon: '🎙️' }
+        );
+      }
+      setTimeout(() => setCopiedLink(false), 2500);
+    } else if (result.method !== 'cancelled') {
+      toast.error('Could not copy lobby link');
+    }
   };
 
   const handleDownloadWav = async (track: StudioTrackRecord) => {
@@ -1294,6 +1411,54 @@ export function PageClientImpl(props: {
               </div>
             </div>
 
+            {/* Live Recording In Progress Alert (if guest arrived while room is recording) */}
+            {roomData?.isRecording && (
+              <div className="rounded-2xl bg-rose-500/15 border border-rose-500/40 p-3 flex items-center justify-between gap-2.5 text-rose-200">
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping shrink-0" />
+                  <span className="text-xs font-semibold">
+                    Live Recording is currently active in this studio! Test your mic below and tap &quot;Join Live Recording&quot; to enter.
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Direct Lobby Share Card */}
+            <div className="rounded-2xl bg-zinc-950/80 border border-white/10 p-3 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-8 h-8 rounded-xl bg-rose-500/15 border border-rose-500/30 flex items-center justify-center text-rose-400 shrink-0">
+                  <Copy className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-white truncate">
+                    Invite Guests to Exact Lobby
+                  </p>
+                  <p className="text-[11px] font-mono text-zinc-400 truncate">
+                    {typeof window !== 'undefined'
+                      ? `${window.location.origin}/rooms/${props.roomName}`
+                      : `/rooms/${props.roomName}`}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleCopyInvite}
+                className="py-2 px-3.5 rounded-xl bg-rose-500 hover:bg-rose-600 active:scale-95 text-white text-xs font-bold transition flex items-center justify-center gap-1.5 shrink-0 shadow-lg shadow-rose-500/20"
+              >
+                {copiedLink ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-white" />
+                    <span>Link Copied</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>Share Lobby</span>
+                  </>
+                )}
+              </button>
+            </div>
+
             {/* Scenario Toggle: Small Room (No Monitoring) vs Remote (Headphones) */}
             <div className="rounded-2xl bg-zinc-950/90 border border-white/10 p-3 space-y-2">
               <div className="flex items-center justify-between">
@@ -1413,23 +1578,37 @@ export function PageClientImpl(props: {
 
               {/* Primary Mobile Actions */}
               <div className="space-y-2.5 pt-1">
-                <button
-                  type="button"
-                  onClick={handleStartMasterRecordFromLobby}
-                  className="w-full py-4 px-5 rounded-2xl bg-gradient-to-r from-rose-600 via-rose-500 to-orange-500 hover:from-rose-500 hover:to-orange-400 text-white font-extrabold text-sm shadow-xl shadow-rose-500/30 flex items-center justify-center gap-2.5 transition active:scale-[0.99]"
-                >
-                  <span className="w-3 h-3 rounded-full bg-white animate-ping" />
-                  <Radio className="w-4 h-4" />
-                  MASTER RECORD: Start for All ({lobbyParticipants.length} Ready)
-                </button>
+                {isHost ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleStartMasterRecordFromLobby}
+                      className="w-full py-4 px-5 rounded-2xl bg-gradient-to-r from-rose-600 via-rose-500 to-orange-500 hover:from-rose-500 hover:to-orange-400 text-white font-extrabold text-sm shadow-xl shadow-rose-500/30 flex items-center justify-center gap-2.5 transition active:scale-[0.99]"
+                    >
+                      <span className="w-3 h-3 rounded-full bg-white animate-ping" />
+                      <Radio className="w-4 h-4" />
+                      MASTER RECORD: Start for All ({lobbyParticipants.length} Ready)
+                    </button>
 
-                <button
-                  type="submit"
-                  className="w-full py-3.5 px-4 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/15 text-white font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2"
-                >
-                  <Smartphone className="w-4 h-4 text-emerald-400" />
-                  Enter Room in Standby (Wait for Host to Record)
-                </button>
+                    <button
+                      type="submit"
+                      className="w-full py-3.5 px-4 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/15 text-white font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2"
+                    >
+                      <Smartphone className="w-4 h-4 text-emerald-400" />
+                      Enter Room in Standby (Wait for Host to Record)
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="submit"
+                    className="w-full py-4 px-5 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-extrabold text-sm shadow-xl shadow-emerald-500/25 flex items-center justify-center gap-2.5 transition active:scale-[0.99]"
+                  >
+                    <Smartphone className="w-4 h-4" />
+                    {roomData?.isRecording
+                      ? 'Join Live Recording as Synced Mic'
+                      : 'Enter Studio as Synced Mic (Ready)'}
+                  </button>
+                )}
               </div>
             </form>
           </div>
@@ -1444,37 +1623,116 @@ export function PageClientImpl(props: {
                     Phones Ready in Room ({lobbyParticipants.length})
                   </h2>
                   <p className="text-[11px] text-zinc-400">
-                    Everyone listed below will record in sync when Master Record
-                    starts
+                    Live microphone levels of everyone in this room lobby
                   </p>
                 </div>
               </div>
             </div>
 
             <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-              {lobbyParticipants.map((lp) => (
-                <div
-                  key={lp.id}
-                  className="p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-between gap-2"
-                >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <div className="min-w-0">
-                      <p className="text-xs font-bold text-white truncate">
-                        {lp.name} {lp.id === lobbyClientId ? '(Your Phone)' : ''}
-                      </p>
-                      <p className="text-[10px] text-emerald-300">
-                        {lp.inStudio
-                          ? 'In Studio â€¢ Mic Armed'
-                          : 'In Lobby â€¢ Mic Ready'}
-                      </p>
+              {lobbyParticipants.map((lp) => {
+                const isSelf = lp.id === lobbyClientId;
+                const currentLevel = isSelf
+                  ? (preJoinAudio ? previewLevel : 0)
+                  : (lp.micReady ? (lp.audioLevel || 0) : 0);
+                const isSpeaking = currentLevel > 14;
+                const isHot = currentLevel > 80;
+                const isWarm = currentLevel > 60;
+
+                return (
+                  <div
+                    key={lp.id}
+                    className={`p-3 rounded-2xl border transition-all ${
+                      isSpeaking
+                        ? 'bg-emerald-500/15 border-emerald-500/50 shadow-md shadow-emerald-500/10'
+                        : 'bg-zinc-950/80 border-white/10'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div
+                          className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
+                            isSpeaking
+                              ? 'bg-emerald-500 text-black font-extrabold animate-pulse'
+                              : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                          }`}
+                        >
+                          <Mic className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <p className="text-xs font-bold text-white truncate">
+                              {lp.name} {isSelf ? '(Your Phone)' : ''}
+                            </p>
+                            <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-white/5 text-zinc-300 border border-white/10">
+                              {lp.role === 'super_admin'
+                                ? 'Super Admin'
+                                : lp.role === 'sub_admin'
+                                ? 'Sub Admin'
+                                : lp.role || 'Member'}
+                            </span>
+                            <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-white/5 text-zinc-300">
+                              {lp.micMode === 'headphone' ? '🎧 Headphone' : '📱 Phone Mic'}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-zinc-400 mt-0.5">
+                            {lp.inStudio ? 'In Studio • Armed' : 'In Lobby • Ready'}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Live Microphone Meter Fallback & Readout */}
+                      <div className="flex flex-col items-end gap-1 shrink-0">
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className={`w-2 h-2 rounded-full ${
+                              !lp.micReady
+                                ? 'bg-rose-500'
+                                : isSpeaking
+                                ? 'bg-emerald-400 animate-ping'
+                                : 'bg-emerald-400'
+                            }`}
+                          />
+                          <span
+                            className={`font-mono text-[11px] font-bold ${
+                              !lp.micReady
+                                ? 'text-rose-400'
+                                : isHot
+                                ? 'text-rose-400'
+                                : isWarm
+                                ? 'text-amber-400'
+                                : 'text-emerald-400'
+                            }`}
+                          >
+                            {lp.micReady ? `${currentLevel}%` : 'MUTED'}
+                          </span>
+                        </div>
+
+                        <div className="w-20 h-2 rounded-full bg-black/70 border border-white/10 overflow-hidden">
+                          <div
+                            className={`h-full transition-all duration-75 ${
+                              !lp.micReady
+                                ? 'bg-rose-500'
+                                : isHot
+                                ? 'bg-rose-500'
+                                : isWarm
+                              ? 'bg-amber-400'
+                              : 'bg-emerald-400'
+                            }`}
+                            style={{
+                              width: `${
+                                lp.micReady
+                                  ? Math.max(isSpeaking ? 15 : 4, currentLevel)
+                                  : 0
+                              }%`,
+                            }}
+                          />
+                        </div>
+                      </div>
                     </div>
                   </div>
-                  <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 shrink-0">
-                    READY
-                  </span>
-                </div>
-              ))}
+                );
+              })}
 
               {rosterMembers
                 .filter(
@@ -1589,8 +1847,20 @@ export function PageClientImpl(props: {
           )}
         </div>
 
-        {/* Right: Mode Toggle + Share */}
+        {/* Right: Mode Toggle + Lobby + Share */}
         <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            onClick={() => {
+              setJoined(false);
+              toast('Switched to Studio Lobby', { icon: '🎙️' });
+            }}
+            title="Return to Studio Lobby"
+            className="px-2.5 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-semibold text-zinc-300 hover:text-white transition flex items-center gap-1.5"
+          >
+            <Users className="w-3.5 h-3.5 text-zinc-400" />
+            <span className="hidden sm:inline">Lobby</span>
+          </button>
+
           <button
             onClick={() => handleToggleSmallRoomMode(!smallRoomMode)}
             title="Toggle Small-Room Zero-Feedback Mode"
@@ -1818,6 +2088,90 @@ export function PageClientImpl(props: {
               )}
             </div>
 
+            {/* Live Studio Individual Microphone Levels HUD Panel */}
+            <div className="rounded-2xl bg-zinc-950/90 border border-white/10 p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Volume2 className="w-4 h-4 text-emerald-400" />
+                  <span className="text-xs font-bold text-white">
+                    Live Microphone Levels ({totalParticipants} Active)
+                  </span>
+                </div>
+                <span className="text-[10px] text-zinc-400 font-mono">
+                  {smallRoomMode ? 'Speakers Muted • Calibrated' : 'Remote 48kHz Audio'}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                {/* Local user meter */}
+                <div className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 transition ${
+                  audioLevel > 14 ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-zinc-900 border-white/5'
+                }`}>
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-white truncate">
+                      {effectiveDisplayName} (You)
+                    </p>
+                    <p className="text-[10px] text-zinc-400 truncate">
+                      {isUsingHeadphoneMic ? '🎧 Headphone Mic' : "📱 Phone's Mic"}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <div className="w-16 h-2 rounded-full bg-zinc-800 overflow-hidden">
+                      <div
+                        className={`h-full transition-all duration-75 ${
+                          !audioEnabled ? 'bg-rose-500' : audioLevel > 80 ? 'bg-rose-500' : audioLevel > 60 ? 'bg-amber-400' : 'bg-emerald-400'
+                        }`}
+                        style={{ width: `${audioEnabled ? Math.max(audioLevel > 14 ? 12 : 4, audioLevel) : 0}%` }}
+                      />
+                    </div>
+                    <span className={`font-mono text-[11px] font-bold w-9 text-right ${
+                      !audioEnabled ? 'text-rose-400' : audioLevel > 80 ? 'text-rose-400' : audioLevel > 60 ? 'text-amber-400' : 'text-emerald-400'
+                    }`}>
+                      {audioEnabled ? `${audioLevel}%` : 'MUTE'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Remote participants meters */}
+                {remoteParticipants.map((part: StudioParticipant) => {
+                  const pLevel = part.audioEnabled ? (part.audioLevel || 0) : 0;
+                  const isPartSpeaking = pLevel > 14;
+                  return (
+                    <div
+                      key={part.peerId}
+                      className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 transition ${
+                        isPartSpeaking ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-zinc-900 border-white/5'
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-white truncate">
+                          {part.displayName}
+                        </p>
+                        <p className="text-[10px] text-zinc-400 truncate">
+                          {part.role === 'host' ? 'Host' : 'Co-Host'}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <div className="w-16 h-2 rounded-full bg-zinc-800 overflow-hidden">
+                          <div
+                            className={`h-full transition-all duration-75 ${
+                              !part.audioEnabled ? 'bg-rose-500' : pLevel > 80 ? 'bg-rose-500' : pLevel > 60 ? 'bg-amber-400' : 'bg-emerald-400'
+                            }`}
+                            style={{ width: `${part.audioEnabled ? Math.max(isPartSpeaking ? 12 : 4, pLevel) : 0}%` }}
+                          />
+                        </div>
+                        <span className={`font-mono text-[11px] font-bold w-9 text-right ${
+                          !part.audioEnabled ? 'text-rose-400' : pLevel > 80 ? 'text-rose-400' : pLevel > 60 ? 'text-amber-400' : 'text-zinc-200'
+                        }`}>
+                          {part.audioEnabled ? `${pLevel}%` : 'MUTE'}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
             {/* Room Participants Grid */}
             <div
               className={`grid gap-3 sm:gap-4 w-full ${
@@ -1847,8 +2201,10 @@ export function PageClientImpl(props: {
                   isRecording={isStudioRecording}
                   isScreenSharing={isScreenSharing}
                   waveformBars={waveformBars}
+                  remoteAudioLevel={audioLevel}
                   isLocal={true}
                   smallRoomMode={smallRoomMode}
+                  micMode={isUsingHeadphoneMic ? 'headphone' : 'phone'}
                 />
               </div>
 
@@ -2144,6 +2500,19 @@ export function PageClientImpl(props: {
             }`}
           >
             <MonitorUp className="w-4 h-4" />
+          </button>
+
+          {/* Lobby Button */}
+          <button
+            onClick={() => {
+              setJoined(false);
+              toast('Switched to Studio Lobby', { icon: '🎙️' });
+            }}
+            title="Return to Studio Lobby"
+            className="px-3 py-3 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/10 text-zinc-200 text-xs font-bold transition flex items-center justify-center gap-1 active:scale-95"
+          >
+            <Users className="w-4 h-4 shrink-0" />
+            <span className="hidden sm:inline">Lobby</span>
           </button>
 
           {/* Leave Studio */}

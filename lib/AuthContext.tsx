@@ -17,13 +17,15 @@ import {
   SUPER_ADMIN_EMAIL,
   isSuperAdminEmail,
   getSuperAdminEmails,
+  isAdminRole,
+  memberDocId,
 } from './session';
 import toast from 'react-hot-toast';
 
 export { SUPER_ADMIN_EMAIL, isSuperAdminEmail, getSuperAdminEmails };
 
 export type SignInResult =
-  | { ok: true; user: User; isSuperAdmin: boolean }
+  | { ok: true; user: User; isSuperAdmin: boolean; isSubAdmin: boolean; role: string }
   | {
       ok: false;
       error: 'not_invited' | 'cancelled' | 'failed' | 'unauthorized_domain';
@@ -35,6 +37,9 @@ interface AuthContextType {
   user: User | null;
   loading: boolean;
   isSuperAdmin: boolean;
+  isSubAdmin: boolean;
+  isAdmin: boolean;
+  role: string;
   /** Google sign-in + server-side invitation check. Sets the session cookie. */
   signInWithGoogle: () => Promise<SignInResult>;
   updateAvatar: (file: File) => Promise<string | null>;
@@ -45,6 +50,9 @@ const AuthContext = createContext<AuthContextType>({
   user: null,
   loading: true,
   isSuperAdmin: false,
+  isSubAdmin: false,
+  isAdmin: false,
+  role: 'member',
   signInWithGoogle: async () => ({ ok: false, error: 'failed' }),
   updateAvatar: async () => null,
   logout: async () => {},
@@ -65,6 +73,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [role, setRole] = useState<string>('member');
+
+  const isSubAdmin = role === 'admin' || role === 'sub_admin';
+  const isAdmin = isSuperAdmin || isSubAdmin;
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -74,6 +86,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!currentUser) {
         setUser(null);
         setIsSuperAdmin(false);
+        setRole('guest');
         setLoading(false);
         return;
       }
@@ -91,13 +104,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const isSuper = isSuperAdminEmail(email);
       setUser(currentUser);
       setIsSuperAdmin(isSuper);
+      if (isSuper) setRole('super_admin');
       setLoading(false);
 
       if (onLogin) return; // the login page runs its own session exchange
 
       try {
         const check = await fetch('/api/auth/session', { cache: 'no-store' });
-        if (!check.ok) {
+        if (check.ok) {
+          const sessData = await check.json().catch(() => ({}));
+          if (sessData.role) {
+            setRole(sessData.role);
+          }
+          if (sessData.isSuperAdmin != null) {
+            setIsSuperAdmin(Boolean(sessData.isSuperAdmin));
+          }
+        } else {
           const r = await createServerSession(currentUser);
           if (!r.ok) {
             await fetch('/api/auth/session', { method: 'DELETE' });
@@ -110,6 +132,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                   )}`;
             window.location.href = redirectUrl;
             return;
+          }
+          if (r.body?.role) {
+            setRole(r.body.role);
+          }
+          if (r.body?.isSuperAdmin != null) {
+            setIsSuperAdmin(Boolean(r.body.isSuperAdmin));
           }
         }
       } catch (err) {
@@ -124,7 +152,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             displayName: currentUser.displayName || 'Podcast Creator',
             email,
             photoURL: currentUser.photoURL || null,
-            role: isSuper ? 'super_admin' : 'member',
+            role: isSuper ? 'super_admin' : role || 'member',
             isSuperAdmin: isSuper,
             lastSeenAt: serverTimestamp(),
           },
@@ -162,12 +190,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             'Could not establish server session',
         };
       }
+      const userRole = r.body?.role || (isSuper ? 'super_admin' : 'member');
+      const resolvedSuperAdmin = Boolean(r.body?.isSuperAdmin || isSuper);
+      const resolvedSubAdmin = userRole === 'admin' || userRole === 'sub_admin';
       setUser(result.user);
-      setIsSuperAdmin(Boolean(r.body?.isSuperAdmin || isSuper));
+      setRole(userRole);
+      setIsSuperAdmin(resolvedSuperAdmin);
       return {
         ok: true,
         user: result.user,
-        isSuperAdmin: Boolean(r.body?.isSuperAdmin || isSuper),
+        isSuperAdmin: resolvedSuperAdmin,
+        isSubAdmin: resolvedSubAdmin,
+        role: userRole,
       };
     } catch (error: any) {
       if (
@@ -265,7 +299,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, loading, isSuperAdmin, signInWithGoogle, updateAvatar, logout }}
+      value={{
+        user,
+        loading,
+        isSuperAdmin,
+        isSubAdmin,
+        isAdmin,
+        role,
+        signInWithGoogle,
+        updateAvatar,
+        logout,
+      }}
     >
       {children}
     </AuthContext.Provider>

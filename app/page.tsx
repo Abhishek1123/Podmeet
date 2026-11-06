@@ -37,6 +37,7 @@ import {
   PodcastMember,
 } from '@/lib/podcast-service';
 import { generateRoomId } from '@/lib/client-utils';
+import { parseRoomJoinInput, shareLobbyLink } from '@/lib/share-utils';
 import toast from 'react-hot-toast';
 
 export default function HomePage() {
@@ -45,6 +46,9 @@ export default function HomePage() {
     user,
     loading,
     isSuperAdmin,
+    isSubAdmin,
+    isAdmin,
+    role,
     logout,
   } = useAuth();
 
@@ -137,6 +141,10 @@ export default function HomePage() {
 
   const handleCreateStudio = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isSuperAdmin) {
+      toast.error('Only the Super Admin is authorized to create new studio rooms.');
+      return;
+    }
     setIsCreating(true);
     try {
       let activeUser = user;
@@ -147,7 +155,7 @@ export default function HomePage() {
         description:
           episodeDesc.trim() ||
           (recordingMode === 'small-room'
-            ? 'In-person small room session â€” local isolated mics, zero speaker feedback.'
+            ? 'In-person small room session — local isolated mics, zero speaker feedback.'
             : 'Remote multi-track podcast session with friends.'),
         episodeNumber: episodeNum,
         hostId: activeUser?.uid || 'anon-host',
@@ -157,8 +165,8 @@ export default function HomePage() {
       });
       toast.success(
         recordingMode === 'small-room'
-          ? 'Small-Room Studio ready! Monitoring muted to prevent feedback.'
-          : 'Podcast studio lobby ready!'
+          ? 'Small-Room Studio ready! Zero feedback.'
+          : 'Remote Podcast Studio ready!'
       );
       router.push(`/rooms/${roomId}?mode=${recordingMode}`);
     } catch (err: unknown) {
@@ -171,25 +179,50 @@ export default function HomePage() {
 
   const handleJoinRoom = (e: React.FormEvent) => {
     e.preventDefault();
-    const raw = joinInput.trim();
-    if (!raw) {
-      toast.error('Enter a room code or invite link');
+    const { roomId, queryString } = parseRoomJoinInput(joinInput);
+    if (!roomId) {
+      toast.error('Enter a valid room code or invite link');
       return;
     }
-    let roomCode = raw;
-    if (raw.includes('/rooms/')) {
-      const parts = raw.split('/rooms/');
-      roomCode = parts[1].split(/[?#]/)[0];
-    }
-    router.push(`/rooms/${roomCode.trim()}`);
+    router.push(
+      `/rooms/${encodeURIComponent(roomId)}${
+        queryString ? `?${queryString}` : ''
+      }`
+    );
   };
 
-  const copyInviteLink = (roomId: string) => {
-    const url = `${window.location.origin}/rooms/${roomId}`;
-    navigator.clipboard.writeText(url);
-    setCopiedRoomId(roomId);
-    toast.success('Room link copied! Everyone in the room can open it on their phone.');
-    setTimeout(() => setCopiedRoomId(null), 2500);
+  const copyInviteLink = async (
+    roomInput: PodcastRoom | string,
+    titleOverride?: string
+  ) => {
+    const roomId = typeof roomInput === 'string' ? roomInput : roomInput.id;
+    const mode =
+      typeof roomInput === 'object' && roomInput.recordingMode
+        ? roomInput.recordingMode
+        : recordingMode;
+    const roomTitle =
+      typeof roomInput === 'object'
+        ? roomInput.title
+        : titleOverride || 'AcidReflux Studio Lobby';
+
+    const result = await shareLobbyLink({
+      roomId,
+      roomTitle,
+      mode,
+    });
+
+    if (result.success) {
+      setCopiedRoomId(roomId);
+      if (result.method === 'clipboard') {
+        toast.success(
+          'Studio Lobby link copied! Everyone in the room can open it on their phone.',
+          { icon: '🎙️' }
+        );
+      }
+      setTimeout(() => setCopiedRoomId(null), 2500);
+    } else if (result.method !== 'cancelled') {
+      toast.error('Could not copy lobby link');
+    }
   };
 
   return (
@@ -231,13 +264,15 @@ export default function HomePage() {
 
           {/* Desktop Center Nav Links */}
           <div className="hidden md:flex items-center gap-2">
-            <button
-              onClick={() => router.push('/admin')}
-              className="px-3.5 py-2 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 text-xs font-semibold flex items-center gap-1.5 transition"
-            >
-              <Crown className="w-3.5 h-3.5" />
-              <span>Crew &amp; Admin ({members.length})</span>
-            </button>
+            {isAdmin && (
+              <button
+                onClick={() => router.push('/admin')}
+                className="px-3.5 py-2 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 text-xs font-semibold flex items-center gap-1.5 transition"
+              >
+                <Crown className="w-3.5 h-3.5" />
+                <span>{isSuperAdmin ? 'Crew & Admin' : 'Admin Portal'} ({members.length})</span>
+              </button>
+            )}
 
             <button
               onClick={() => router.push('/editor')}
@@ -261,9 +296,17 @@ export default function HomePage() {
                       <p className="text-xs font-semibold text-white leading-none">
                         {user.displayName || 'Abhishek'}
                       </p>
-                      {isSuperAdmin && (
+                      {isSuperAdmin ? (
                         <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40">
-                          ADMIN
+                          SUPER ADMIN
+                        </span>
+                      ) : isSubAdmin ? (
+                        <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-300 border border-violet-500/40">
+                          SUB ADMIN
+                        </span>
+                      ) : (
+                        <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-white/10 text-zinc-300 border border-white/15">
+                          CREW
                         </span>
                       )}
                     </div>
@@ -349,11 +392,11 @@ export default function HomePage() {
 
               <div className="grid grid-cols-2 sm:flex sm:flex-row items-stretch sm:items-center gap-2.5 sm:gap-3">
                 <a
-                  href="#studio"
+                  href={isSuperAdmin ? '#studio' : '#studios'}
                   className="px-4 sm:px-6 py-3.5 rounded-2xl btn-chili text-xs sm:text-sm flex items-center justify-center gap-1.5 sm:gap-2 active:scale-[0.99] transition"
                 >
                   <Radio className="w-4 h-4 shrink-0" />
-                  <span>Start Recording</span>
+                  <span>{isSuperAdmin ? 'Start Recording' : 'Join Studio'}</span>
                 </a>
                 <button
                   onClick={() => router.push('/editor')}
@@ -422,164 +465,213 @@ export default function HomePage() {
 
         {/* Action Grid: Launch Studio vs Active Studios */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-          {/* Left: Create New Podcast Studio */}
+          {/* Left: Create New Podcast Studio (Super Admin Only) */}
           <div id="studio" className="lg:col-span-7 scroll-mt-24 rounded-3xl bg-zinc-900/80 border border-white/10 p-4 sm:p-7 backdrop-blur-xl shadow-2xl">
-            <div className="flex items-center justify-between gap-2 mb-4">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-rose-500/15 border border-rose-500/30 flex items-center justify-center text-rose-400 shrink-0">
-                  <Plus className="w-5 h-5" />
+            {isSuperAdmin ? (
+              <>
+                <div className="flex items-center justify-between gap-2 mb-4">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-rose-500/15 border border-rose-500/30 flex items-center justify-center text-rose-400 shrink-0">
+                      <Plus className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h1 className="text-base sm:text-xl font-bold text-white">
+                        Start Recording Session
+                      </h1>
+                      <p className="text-[11px] sm:text-xs text-zinc-400">
+                        Use phones in a small room as synced mics, or record remotely
+                      </p>
+                    </div>
+                  </div>
+                  <span className="text-xs font-mono px-2.5 py-1 rounded-lg bg-white/5 text-zinc-300 border border-white/10 shrink-0">
+                    EP #{episodeNum}
+                  </span>
                 </div>
-                <div>
-                  <h1 className="text-base sm:text-xl font-bold text-white">
-                    Start Recording Session
-                  </h1>
-                  <p className="text-[11px] sm:text-xs text-zinc-400">
-                    Use phones in a small room as synced mics, or record remotely
+
+                <form onSubmit={handleCreateStudio} className="space-y-4">
+                  {/* Scenario Mode Selector */}
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-300 mb-2">
+                      Recording Scenario
+                    </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => setRecordingMode('small-room')}
+                        className={`p-3.5 rounded-2xl border text-left transition flex items-start gap-3 ${
+                          recordingMode === 'small-room'
+                            ? 'bg-emerald-500/15 border-emerald-500/50 text-white shadow-lg shadow-emerald-500/10'
+                            : 'bg-zinc-950/70 border-white/10 text-zinc-400 hover:text-zinc-200'
+                        }`}
+                      >
+                        <VolumeX
+                          className={`w-5 h-5 shrink-0 mt-0.5 ${
+                            recordingMode === 'small-room'
+                              ? 'text-emerald-400'
+                              : 'text-zinc-500'
+                          }`}
+                        />
+                        <div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-xs sm:text-sm font-bold text-white">
+                              Small Room (Same Room)
+                            </span>
+                            <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-emerald-500/25 text-emerald-300">
+                              DEFAULT
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-zinc-400 mt-0.5 leading-snug">
+                            Record only, <strong>no audio monitoring</strong>. Zero
+                            speaker feedback when sitting together.
+                          </p>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setRecordingMode('remote')}
+                        className={`p-3.5 rounded-2xl border text-left transition flex items-start gap-3 ${
+                          recordingMode === 'remote'
+                            ? 'bg-violet-500/15 border-violet-500/50 text-white shadow-lg shadow-violet-500/10'
+                            : 'bg-zinc-950/70 border-white/10 text-zinc-400 hover:text-zinc-200'
+                        }`}
+                      >
+                        <Headphones
+                          className={`w-5 h-5 shrink-0 mt-0.5 ${
+                            recordingMode === 'remote'
+                              ? 'text-violet-400'
+                              : 'text-zinc-500'
+                          }`}
+                        />
+                        <div>
+                          <span className="text-xs sm:text-sm font-bold text-white">
+                            Remote Studio (Call)
+                          </span>
+                          <p className="text-[11px] text-zinc-400 mt-0.5 leading-snug">
+                            Live audio/video monitoring for members in different
+                            locations wearing headphones.
+                          </p>
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Microphone Input Selection: Phone's Mic vs Headphone Mic */}
+                  <MicSelector
+                    audioDevices={audioDevices}
+                    selectedDeviceId={selectedAudioDevice}
+                    micMode={micMode}
+                    activeHardwareLabel={activeHardwareLabel}
+                    compact
+                    onSelectMic={(devId, mode) => {
+                      setSelectedAudioDevice(devId);
+                      setMicMode(mode);
+                      saveMicSelection(mode, devId);
+                    }}
+                    onRescanDevices={() => scanAudioDevices(true)}
+                  />
+
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                    <div className="sm:col-span-3">
+                      <label className="block text-xs font-medium text-zinc-300 mb-1">
+                        Episode Title
+                      </label>
+                      <input
+                        type="text"
+                        value={episodeTitle}
+                        onChange={(e) => setEpisodeTitle(e.target.value)}
+                        placeholder="e.g., Ep. 12 — Late Night Small Room Pod"
+                        className="w-full px-3.5 py-3 rounded-xl bg-zinc-950/90 border border-white/10 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-rose-500 transition"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-zinc-300 mb-1">
+                        Episode #
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        value={episodeNum}
+                        onChange={(e) => setEpisodeNum(Number(e.target.value) || 1)}
+                        className="w-full px-3.5 py-3 rounded-xl bg-zinc-950/90 border border-white/10 text-sm text-white focus:outline-none focus:border-rose-500 transition"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-300 mb-1">
+                      Show Notes / Talking Points (Visible on everyone&apos;s phone)
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={episodeDesc}
+                      onChange={(e) => setEpisodeDesc(e.target.value)}
+                      placeholder="Bullet points or cues everyone can read on their phone while recording..."
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-zinc-950/90 border border-white/10 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-rose-500 transition resize-none"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isCreating}
+                    className="w-full py-4 px-5 rounded-2xl btn-chili active:scale-[0.99] text-sm transition flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    <Radio className="w-4 h-4" />
+                    {isCreating
+                      ? 'Opening Studio...'
+                      : recordingMode === 'small-room'
+                      ? 'Launch Small-Room Recorder (No Feedback)'
+                      : 'Launch Remote Studio Lobby'}
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+                </form>
+              </>
+            ) : (
+              <div className="space-y-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-300 shrink-0">
+                    <Crown className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h2 className="text-base sm:text-lg font-bold text-white">
+                      Podcast Studio Rooms
+                    </h2>
+                    <p className="text-xs text-zinc-400">
+                      Super Admin creates episodes • Join your studio below
+                    </p>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl bg-zinc-950/80 border border-white/10 p-4 space-y-2">
+                  <p className="text-xs text-zinc-300 leading-relaxed">
+                    Only the <strong>Super Admin</strong> ({SUPER_ADMIN_EMAIL}) can launch new episodes and create studio rooms.
+                  </p>
+                  <p className="text-xs text-zinc-400 leading-relaxed">
+                    Ready to record? Select an active studio from the list below, or enter your invite code above to join the studio lobby.
                   </p>
                 </div>
-              </div>
-              <span className="text-xs font-mono px-2.5 py-1 rounded-lg bg-white/5 text-zinc-300 border border-white/10 shrink-0">
-                EP #{episodeNum}
-              </span>
-            </div>
 
-            <form onSubmit={handleCreateStudio} className="space-y-4">
-              {/* Scenario Mode Selector */}
-              <div>
-                <label className="block text-xs font-semibold text-zinc-300 mb-2">
-                  Recording Scenario
-                </label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  <button
-                    type="button"
-                    onClick={() => setRecordingMode('small-room')}
-                    className={`p-3.5 rounded-2xl border text-left transition flex items-start gap-3 ${
-                      recordingMode === 'small-room'
-                        ? 'bg-emerald-500/15 border-emerald-500/50 text-white shadow-lg shadow-emerald-500/10'
-                        : 'bg-zinc-950/70 border-white/10 text-zinc-400 hover:text-zinc-200'
-                    }`}
-                  >
-                    <VolumeX
-                      className={`w-5 h-5 shrink-0 mt-0.5 ${
-                        recordingMode === 'small-room'
-                          ? 'text-emerald-400'
-                          : 'text-zinc-500'
-                      }`}
-                    />
-                    <div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-xs sm:text-sm font-bold text-white">
-                          Small Room (Same Room)
-                        </span>
-                        <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-emerald-500/25 text-emerald-300">
-                          DEFAULT
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-zinc-400 mt-0.5 leading-snug">
-                        Record only, <strong>no audio monitoring</strong>. Zero
-                        speaker feedback when sitting together.
-                      </p>
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setRecordingMode('remote')}
-                    className={`p-3.5 rounded-2xl border text-left transition flex items-start gap-3 ${
-                      recordingMode === 'remote'
-                        ? 'bg-violet-500/15 border-violet-500/50 text-white shadow-lg shadow-violet-500/10'
-                        : 'bg-zinc-950/70 border-white/10 text-zinc-400 hover:text-zinc-200'
-                    }`}
-                  >
-                    <Headphones
-                      className={`w-5 h-5 shrink-0 mt-0.5 ${
-                        recordingMode === 'remote'
-                          ? 'text-violet-400'
-                          : 'text-zinc-500'
-                      }`}
-                    />
-                    <div>
-                      <span className="text-xs sm:text-sm font-bold text-white">
-                        Remote Studio (Call)
-                      </span>
-                      <p className="text-[11px] text-zinc-400 mt-0.5 leading-snug">
-                        Live audio/video monitoring for members in different
-                        locations wearing headphones.
-                      </p>
-                    </div>
-                  </button>
-                </div>
-              </div>
-
-              {/* Microphone Input Selection: Phone's Mic vs Headphone Mic */}
-              <MicSelector
-                audioDevices={audioDevices}
-                selectedDeviceId={selectedAudioDevice}
-                micMode={micMode}
-                activeHardwareLabel={activeHardwareLabel}
-                compact
-                onSelectMic={(devId, mode) => {
-                  setSelectedAudioDevice(devId);
-                  setMicMode(mode);
-                  saveMicSelection(mode, devId);
-                }}
-                onRescanDevices={() => scanAudioDevices(true)}
-              />
-
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                <div className="sm:col-span-3">
-                  <label className="block text-xs font-medium text-zinc-300 mb-1">
-                    Episode Title
-                  </label>
-                  <input
-                    type="text"
-                    value={episodeTitle}
-                    onChange={(e) => setEpisodeTitle(e.target.value)}
-                    placeholder="e.g., Ep. 12 â€” Late Night Small Room Pod"
-                    className="w-full px-3.5 py-3 rounded-xl bg-zinc-950/90 border border-white/10 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-rose-500 transition"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-zinc-300 mb-1">
-                    Episode #
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    value={episodeNum}
-                    onChange={(e) => setEpisodeNum(Number(e.target.value) || 1)}
-                    className="w-full px-3.5 py-3 rounded-xl bg-zinc-950/90 border border-white/10 text-sm text-white focus:outline-none focus:border-rose-500 transition"
+                {/* Microphone selector test for crew */}
+                <div className="pt-2">
+                  <p className="text-xs font-semibold text-zinc-300 mb-2">
+                    Your Microphone Check
+                  </p>
+                  <MicSelector
+                    audioDevices={audioDevices}
+                    selectedDeviceId={selectedAudioDevice}
+                    micMode={micMode}
+                    activeHardwareLabel={activeHardwareLabel}
+                    compact
+                    onSelectMic={(devId, mode) => {
+                      setSelectedAudioDevice(devId);
+                      setMicMode(mode);
+                      saveMicSelection(mode, devId);
+                    }}
+                    onRescanDevices={() => scanAudioDevices(true)}
                   />
                 </div>
               </div>
-
-              <div>
-                <label className="block text-xs font-medium text-zinc-300 mb-1">
-                  Show Notes / Talking Points (Visible on everyone&apos;s phone)
-                </label>
-                <textarea
-                  rows={2}
-                  value={episodeDesc}
-                  onChange={(e) => setEpisodeDesc(e.target.value)}
-                  placeholder="Bullet points or cues everyone can read on their phone while recording..."
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-zinc-950/90 border border-white/10 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-rose-500 transition resize-none"
-                />
-              </div>
-
-              <button
-                type="submit"
-                disabled={isCreating}
-                className="w-full py-4 px-5 rounded-2xl btn-chili active:scale-[0.99] text-sm transition flex items-center justify-center gap-2 disabled:opacity-50"
-              >
-                <Radio className="w-4 h-4" />
-                {isCreating
-                  ? 'Opening Studio...'
-                  : recordingMode === 'small-room'
-                  ? 'Launch Small-Room Recorder (No Feedback)'
-                  : 'Launch Remote Studio Lobby'}
-                <ArrowRight className="w-4 h-4" />
-              </button>
-            </form>
+            )}
           </div>
 
           {/* Right: Small-Room Recording Guide + Quick Tools */}
@@ -645,7 +737,7 @@ export default function HomePage() {
         </div>
 
         {/* Active & Past Podcast Studios */}
-        <section className="pt-2">
+        <section id="studios" className="pt-2 scroll-mt-20">
           <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="text-lg sm:text-2xl font-bold text-white">
@@ -702,16 +794,20 @@ export default function HomePage() {
                               Ready
                             </span>
                           )}
-                          <button
-                            onClick={async () => {
-                              await deletePodcastRoom(room.id);
-                              toast.success('Studio removed');
-                            }}
-                            title="Delete studio"
-                            className="p-1.5 text-zinc-500 hover:text-rose-400 transition"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          {isSuperAdmin && (
+                            <button
+                              onClick={async () => {
+                                if (confirm(`Remove studio "${room.title}"?`)) {
+                                  await deletePodcastRoom(room.id);
+                                  toast.success('Studio removed');
+                                }
+                              }}
+                              title="Delete studio (Super Admin)"
+                              className="p-1.5 text-zinc-500 hover:text-rose-400 transition"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
                       </div>
 
@@ -728,7 +824,7 @@ export default function HomePage() {
 
                     <div className="mt-4 pt-3.5 border-t border-white/10 flex items-center gap-2">
                       <button
-                        onClick={() => copyInviteLink(room.id)}
+                        onClick={() => copyInviteLink(room, room.title)}
                         className="flex-1 py-2.5 px-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-semibold text-zinc-200 transition flex items-center justify-center gap-1.5"
                       >
                         {copiedRoomId === room.id ? (
@@ -744,7 +840,13 @@ export default function HomePage() {
                         )}
                       </button>
                       <button
-                        onClick={() => router.push(`/rooms/${room.id}`)}
+                        onClick={() =>
+                          router.push(
+                            `/rooms/${room.id}?mode=${
+                              room.recordingMode || 'small-room'
+                            }`
+                          )
+                        }
                         className="flex-1 py-2.5 px-3 rounded-xl bg-rose-500 hover:bg-rose-600 text-xs font-bold text-white transition flex items-center justify-center gap-1.5 shadow-lg shadow-rose-500/20"
                       >
                         Join as Mic
@@ -777,11 +879,11 @@ export default function HomePage() {
             <span>Audio Editor</span>
           </button>
           <button
-            onClick={() => router.push('/admin')}
+            onClick={() => router.push(isAdmin ? '/admin' : '/')}
             className="flex flex-col items-center justify-center gap-1 text-zinc-400 hover:text-white font-medium text-[11px]"
           >
             <Users className="w-4 h-4" />
-            <span>Crew ({members.length})</span>
+            <span>{isAdmin ? 'Crew & Admin' : 'Crew'} ({members.length})</span>
           </button>
         </div>
       </nav>

@@ -48,6 +48,26 @@ export const SUPER_ADMIN_EMAIL =
   (envAdmin ? envAdmin.split(',')[0].trim().toLowerCase() : '') ||
   DEFAULT_SUPER_ADMIN;
 
+/** Member doc ids are the lowercased email with non-alphanumerics replaced by "_". */
+export function memberDocId(email: string): string {
+  return email.trim().toLowerCase().replace(/[^a-z0-9]/g, '_');
+}
+
+/** Roles that may open the /admin section. `admin` and `sub_admin` = sub admin. */
+export function isAdminRole(role: string | null | undefined, isSuperAdmin = false) {
+  if (isSuperAdmin) return true;
+  if (!role) return false;
+  const clean = role.toLowerCase().trim();
+  return clean === 'super_admin' || clean === 'admin' || clean === 'sub_admin';
+}
+
+/** Check if a role is a Sub Admin role */
+export function isSubAdminRole(role: string | null | undefined): boolean {
+  if (!role) return false;
+  const clean = role.toLowerCase().trim();
+  return clean === 'admin' || clean === 'sub_admin';
+}
+
 export interface SessionPayload {
   email: string;
   name?: string;

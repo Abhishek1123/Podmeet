@@ -92,17 +92,18 @@ export async function POST(req: NextRequest) {
 
   if (!isSuperAdmin) {
     const invite = await findInvitation(idToken, email);
-    if (!invite) {
-      console.warn(
-        `[Auth Session] Access denied: ${email} is not in super admin emails and has no member invitation.`
-      );
-      return NextResponse.json({ error: 'not_invited', email }, { status: 403 });
+    if (invite) {
+      role = invite.role;
+      if (role === 'super_admin') {
+        isSuperAdmin = true;
+      }
+      name = invite.name || name;
+    } else {
+      // Verified Google users with a share link enter as 'guest' so they can join the lobby as a mic.
+      // Admin dashboard routes remain strictly protected by isAdminRole in middleware.
+      role = 'guest';
+      name = name || email.split('@')[0];
     }
-    role = invite.role;
-    if (role === 'super_admin') {
-      isSuperAdmin = true;
-    }
-    name = invite.name || name;
   }
 
   let token: string;

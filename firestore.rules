@@ -19,7 +19,10 @@ service cloud.firestore {
     }
 
     match /rooms/{roomId} {
-      allow read, write: if invited();
+      allow read: if invited();
+      allow create: if superAdmin();
+      allow update: if invited();
+      allow delete: if superAdmin();
       match /{document=**} {
         allow read, write: if invited();
       }

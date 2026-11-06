@@ -13,10 +13,14 @@ export default async function Page({
     hq?: string;
     codec?: string;
     singlePC?: string;
+    mode?: string;
+    member?: string;
+    email?: string;
   }>;
 }) {
   const _params = await params;
   const _searchParams = await searchParams;
+  const cleanRoomName = decodeURIComponent(_params.roomName || '').trim();
   const codec =
     typeof _searchParams.codec === 'string' && isVideoCodec(_searchParams.codec)
       ? _searchParams.codec
@@ -30,13 +34,21 @@ export default async function Page({
   return (
     <React.Suspense
       fallback={
-        <div className="min-h-screen bg-[#090a0f] text-zinc-400 flex items-center justify-center text-sm">
-          Loading Studio Lobby...
+        <div className="min-h-screen bg-[#070707] text-zinc-300 flex flex-col items-center justify-center gap-3">
+          <div className="w-12 h-12 rounded-2xl bg-rose-500/15 border border-rose-500/30 flex items-center justify-center text-rose-400 animate-pulse">
+            <span className="w-3 h-3 rounded-full bg-rose-500" />
+          </div>
+          <p className="text-sm font-semibold text-zinc-200">
+            Opening Studio Lobby...
+          </p>
+          <p className="text-xs text-zinc-500 font-mono">
+            Room: {cleanRoomName}
+          </p>
         </div>
       }
     >
       <PageClientImpl
-        roomName={_params.roomName}
+        roomName={cleanRoomName}
         serverUrl={serverUrl}
         region={_searchParams.region}
         hq={hq}
